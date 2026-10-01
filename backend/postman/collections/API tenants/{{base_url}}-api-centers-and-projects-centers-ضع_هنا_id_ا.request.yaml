@@ -1,0 +1,18 @@
+$kind: http-request
+name: "{{base_url}}/api/centers-and-projects/centers/ضع_هنا_id_المركز_الفرعي/"
+description: ""
+url: "{{base_url}}/api/centers-and-projects/centers/4eee95ea-bb64-40e2-9e3c-11da7eceb518/"
+method: PUT
+headers:
+  Tenant-ID: "{{tenant_id}}"
+  Authorization: Bearer {{jwt_token}}
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"مركز الفجر القرآني (المحدث)\",\r
+
+    \  \"address\": \"حي الياسمين - الشارع العام\"\r
+
+    }"
+order: 4417359090909605

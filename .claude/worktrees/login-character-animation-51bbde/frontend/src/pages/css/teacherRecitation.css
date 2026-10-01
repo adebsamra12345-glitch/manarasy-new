@@ -1,0 +1,13 @@
+﻿/* ===== Teacher Recitation Evaluation ===== */
+.recitation-page { padding: 1.5rem; }
+.student-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.student-row {
+    background: var(--card-bg);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow-sm);
+}
+.grade-buttons { display: flex; gap: 0.5rem; }

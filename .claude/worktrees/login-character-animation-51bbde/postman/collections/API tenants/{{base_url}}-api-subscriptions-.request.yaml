@@ -1,0 +1,21 @@
+$kind: http-request
+name: "{{base_url}}/api/subscriptions/"
+description: ""
+url: "{{base_url}}/api/subscriptions/"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: "{\r
+
+    \  \"tenant_id\":\"2f34a04d-4f94-4c90-913e-9039be5eb03f\",\r
+
+    \  \"plan_id\":1,\r
+
+    \  \"starts_at\": \"2026-09-01T00:00:00Z\",\r
+
+    \  \"ends_at\": \"2026-10-01T00:00:00Z\"\r
+
+    }"
+order: 4331245621500896

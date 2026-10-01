@@ -1,0 +1,25 @@
+$kind: http-request
+name: "{{base_url}}/api/centers/"
+description: ""
+url: "{{base_url}}/api/centers-and-projects/centers/"
+method: GET
+headers:
+  Authorization: Bearer {{jwt_token}}
+  Tenant-ID: "{{tenant_id}}"
+  Content-Type: application/json
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"مركز الفجر القرآني\",\r
+
+    \  \"code\": \"FAJR_01\",\r
+
+    \  \"address\": \"حي الياسمين\",\r
+
+    \  \"latitude\": 24.7136,\r
+
+    \  \"longitude\": 46.6753\r
+
+    }"
+order: 4339892971371494

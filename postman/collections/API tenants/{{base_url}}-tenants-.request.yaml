@@ -1,0 +1,30 @@
+$kind: http-request
+name: "{{base_url}}/tenants/"
+description: ""
+url: "{{base_url}}/tenants/"
+method: POST
+headers:
+  Content-Type: application/json
+  Authorization: Bearer {{jwt_token}}
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"جامع النصرى\",\r
+
+    \  \"subdomain\": \"alnasseer\",\r
+
+    \  \"db_name\": \"tenant_alnasseer_db\",\r
+
+    \  \"contact_phone\": \"+963911223344\",\r
+
+    \  \"center_latitude\":\"3.22265454455\",  \r
+
+    \  \"center_longitude\":\"2.554663255469\",\r
+
+    \  \"contact_email\": \"admin@alhuda.org\",\r
+
+    \  \"admin_password\": \"StrongPassword2026!\"\r
+
+    }"
+order: 1788536846687

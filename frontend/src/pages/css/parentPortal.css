@@ -1,0 +1,13 @@
+﻿/* ===== Parent Portal ===== */
+.parent-page { padding: 1.5rem; }
+.child-summary-card {
+    background: linear-gradient(135deg, var(--primary-green), #2e7d32);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    color: #fff;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.progress-section { background: var(--card-bg); border-radius: var(--radius-lg); padding: 1.5rem; box-shadow: var(--shadow-sm); }

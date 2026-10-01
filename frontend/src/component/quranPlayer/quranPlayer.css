@@ -1,0 +1,29 @@
+﻿/* ===== Quran Audio Player ===== */
+.quran-player {
+    background: linear-gradient(135deg, #0f2c0f, #1a4a1a);
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+.player-title { font-size: 1rem; font-weight: 600; text-align: center; }
+.player-controls { display: flex; justify-content: center; align-items: center; gap: 1rem; }
+.player-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    border-radius: 50%;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: #fff;
+    transition: background 0.2s;
+}
+.player-btn:hover { background: rgba(255,255,255,0.2); }
+.play-btn { width: 52px; height: 52px; background: rgba(255,255,255,0.2); }
+.player-progress {
+    width: 100%;
+    accent-color: #4caf50;
+    cursor: pointer;
+}

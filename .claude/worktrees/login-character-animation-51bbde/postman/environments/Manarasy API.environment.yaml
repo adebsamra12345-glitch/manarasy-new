@@ -1,0 +1,8 @@
+name: Manarasy API
+values:
+  - key: '{{base_url}}'
+    value: ''
+  - key: '{{jwt_token}}'
+    secret: true
+  - key: '{{tenant_id}}'
+    value: ''

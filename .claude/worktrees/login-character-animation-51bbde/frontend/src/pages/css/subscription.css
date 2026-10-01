@@ -1,0 +1,17 @@
+﻿/* ===== Subscription / Pricing Plans ===== */
+.pricing-page { padding: 2rem; }
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; margin-top: 2rem; }
+.plan-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    border: 2px solid transparent;
+    transition: border-color 0.2s, transform 0.2s;
+}
+.plan-card:hover { transform: translateY(-4px); border-color: var(--primary-green); }
+.plan-card.featured { border-color: var(--accent-gold); }
+.plan-price { font-size: 2.5rem; font-weight: 900; color: var(--primary-green); }

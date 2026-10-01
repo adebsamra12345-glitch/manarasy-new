@@ -1,0 +1,14 @@
+﻿/* ===== Super Admin Dashboard ===== */
+.super-admin-page { padding: 1.5rem; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
+.stat-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.stat-card .stat-value { font-size: 2rem; font-weight: 800; color: var(--primary-green); }
+.stat-card .stat-label { font-size: 0.85rem; color: var(--text-secondary); }

@@ -1,0 +1,18 @@
+$kind: http-request
+name: "{{base_url}}/api/tenants/login/"
+description: ""
+url: "{{base_url}}/api/tenants/login/"
+method: POST
+headers:
+  Content-Type: application/json
+  Host: alnasseer.localhost:8000
+body:
+  type: json
+  content: "{ // استبدله بالنطاق الفرعي للمسجد الذي أنشأته (مثل alnoor أو omar)\r
+
+    \  \"username\": \"manager\", // الحساب الافتراضي لمدير المسجد\r
+
+    \  \"password\": \"StrongPassword2026!\" // كلمة المرور (admin_password) التي وضعتها عند تسجيل المسجد\r
+
+    }"
+order: 2577634467621296

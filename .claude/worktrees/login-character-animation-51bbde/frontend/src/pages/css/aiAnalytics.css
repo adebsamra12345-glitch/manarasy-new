@@ -1,0 +1,19 @@
+﻿/* ===== AI Analytics Dashboard ===== */
+.ai-page { padding: 1.5rem; }
+.ai-header {
+    background: linear-gradient(135deg, #0f2c0f, #1a4a1a);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem 2rem;
+    color: #fff;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.predictions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
+.prediction-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-sm);
+}

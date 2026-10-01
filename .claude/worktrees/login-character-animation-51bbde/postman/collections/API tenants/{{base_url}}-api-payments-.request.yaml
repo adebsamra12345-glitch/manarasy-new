@@ -1,0 +1,19 @@
+$kind: http-request
+name: "{{base_url}}/api/payments/"
+description: ""
+url: "{{base_url}}/api/payments/"
+method: GET
+body:
+  type: json
+  content: "{\r
+
+    \  \"subscription_id\": \"76371578-77e0-4675-a117-3e1448b74ba3\",\r
+
+    \  \"amount\": \"30.00\",\r
+
+    \  \"currency\": \"USD\",\r
+
+    \  \"transaction_id\": \"SHAM_CASH_TX_001\"\r
+
+    }"
+order: 4255690686311365

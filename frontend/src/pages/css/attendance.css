@@ -1,0 +1,19 @@
+﻿/* ===== Attendance Page ===== */
+.attendance-page { padding: 1.5rem; }
+.attendance-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+.attendance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
+.student-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.student-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.student-card.present { border: 2px solid #4caf50; }
+.student-card.absent  { border: 2px solid #e53935; }

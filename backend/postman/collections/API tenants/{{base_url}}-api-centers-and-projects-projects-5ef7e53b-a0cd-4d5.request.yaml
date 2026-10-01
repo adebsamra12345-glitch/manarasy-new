@@ -1,0 +1,18 @@
+$kind: http-request
+name: "{{base_url}}/api/centers-and-projects/projects/5ef7e53b-a0cd-4d52-bfb1-db26b0322158/"
+description: ""
+url: "{{base_url}}/api/centers-and-projects/projects/"
+method: POST
+headers:
+  Tenant-ID: "{{tenant_id}}"
+  Authorization: Bearer {{jwt_token}}
+body:
+  type: json
+  content: "{\"title\": \"2 مشروع الإتقان المكثف\",\r
+
+    \"description\": \"مشروع مكثف لحفظ اخر خمس اجزاء\",\r
+
+    \"is_global\": 1,\r
+
+    \"confirm_duplicate\" : 1}"
+order: 4461850152366821

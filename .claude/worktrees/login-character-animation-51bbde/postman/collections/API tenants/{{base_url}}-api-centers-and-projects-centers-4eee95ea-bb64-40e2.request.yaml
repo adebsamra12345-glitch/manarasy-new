@@ -1,0 +1,21 @@
+$kind: http-request
+name: "{{base_url}}/api/centers-and-projects/centers/4eee95ea-bb64-40e2-9e3c-11da7eceb518/"
+description: ""
+url: "{{base_url}}/api/centers-and-projects/centers/4eee95ea-bb64-40e2-9e3c-11da7eceb518/?Tenant-ID={{tenant_id}}&Authorization=Bearer {{jwt_token}}"
+method: PATCH
+headers:
+  Tenant-ID: "{{tenant_id}}"
+  Authorization: Bearer {{jwt_token}}
+queryParams:
+  - key: Tenant-ID
+    value: "{{tenant_id}}"
+    disabled: false
+    description: ""
+  - key: Authorization
+    value: Bearer {{jwt_token}}
+    disabled: false
+    description: ""
+body:
+  type: json
+  content: "{\r\n  \"is_active\": false\r\n}"
+order: 4438689010474727
