@@ -10,6 +10,7 @@ class Center(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    is_rewards_store_enabled = models.BooleanField(default=True, help_text="التحكم بفتح أو إغلاق متجر المكافآت على مستوى المركز")
     manager = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         on_delete=models.SET_NULL, 

@@ -31,6 +31,26 @@ export const rejectRegistrationRequest = async (requestId) => {
     return response.data;
 };
 
+export const approveStudentRegistrationRequest = async (requestId) => {
+    const response = await apiClient.post(`/api/students-and-parents/students/registration-requests/${requestId}/approve/`);
+    return response.data;
+};
+
+export const rejectStudentRegistrationRequest = async (requestId, payload = {}) => {
+    const response = await apiClient.post(`/api/students-and-parents/students/registration-requests/${requestId}/reject/`, payload);
+    return response.data;
+};
+
+export const approveStudentDeletionRequest = async (requestId) => {
+    const response = await apiClient.post(`/api/students-and-parents/students/deletion-requests/${requestId}/approve/`);
+    return response.data;
+};
+
+export const rejectStudentDeletionRequest = async (requestId, payload = {}) => {
+    const response = await apiClient.post(`/api/students-and-parents/students/deletion-requests/${requestId}/reject/`, payload);
+    return response.data;
+};
+
 export const getStudents = async (params = {}) => {
     const cleanParams = Object.fromEntries(
         Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '' && v !== 'all')
@@ -300,6 +320,21 @@ export const getHalaqat = async () => {
 
 export const getHalaqaById = async (id) => {
     const response = await apiClient.get('/api/halaqat/' + id + '/');
+    return response.data;
+};
+
+export const createHalaqa = async (payload) => {
+    const response = await apiClient.post('/api/halaqat/', payload);
+    return response.data;
+};
+
+export const updateHalaqa = async (id, payload) => {
+    const response = await apiClient.put(`/api/halaqat/${id}/`, payload);
+    return response.data;
+};
+
+export const deleteHalaqa = async (id) => {
+    const response = await apiClient.delete(`/api/halaqat/${id}/`);
     return response.data;
 };
 

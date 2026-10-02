@@ -20,6 +20,40 @@ const ORPHAN_CHOICES = [
     { value: 't', label: 'يتيم الأبوين (الاثنين)' },
 ];
 
+const arabicToLatinMap = {
+    'أ': 'a', 'إ': 'a', 'آ': 'a', 'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th',
+    'ج': 'j', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'dh', 'ر': 'r', 'ز': 'z',
+    'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a',
+    'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n',
+    'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ئ': 'y', 'ء': '', 'ة': 'a', ' ': '.'
+};
+
+const transliterateArabicName = (nameStr) => {
+    if (!nameStr) return '';
+    let clean = nameStr.trim();
+    clean = clean.replace(/محمد/g, 'mohammad')
+                 .replace(/أحمد|احمد/g, 'ahmad')
+                 .replace(/محمود/g, 'mahmoud')
+                 .replace(/مصطفى/g, 'mustafa')
+                 .replace(/عبد/g, 'abd')
+                 .replace(/علي/g, 'ali')
+                 .replace(/عمر/g, 'omar')
+                 .replace(/عثمان/g, 'othman')
+                 .replace(/إبراهيم|ابراهيم/g, 'ibrahim')
+                 .replace(/سمرة/g, 'samra');
+    
+    let res = '';
+    for (let i = 0; i < clean.length; i++) {
+        const char = clean[i];
+        if (arabicToLatinMap[char] !== undefined) {
+            res += arabicToLatinMap[char];
+        } else if (/[a-zA-Z0-9._-]/.test(char)) {
+            res += char.toLowerCase();
+        }
+    }
+    return res.replace(/\.+/g, '.').replace(/^\.|\.$/g, '');
+};
+
 const CreateUserModal = ({ isOpen, onClose, onUserCreated, centers = [] }) => {
     const initialFormState = {
         first_name: '',
@@ -46,6 +80,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, centers = [] }) => {
     };
 
     const [formData, setFormData] = useState(initialFormState);
+    const [isUsernameEdited, setIsUsernameEdited] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const [parentWarning, setParentWarning] = useState(null);
@@ -54,10 +89,28 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, centers = [] }) => {
 
     const handleInputChange = (e) => {
         const { name, value, type, checked } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: type === 'checkbox' ? checked : value
-        }));
+        if (name === 'username') {
+            setIsUsernameEdited(true);
+        }
+
+        setFormData(prev => {
+            const val = type === 'checkbox' ? checked : value;
+            const updated = {
+                ...prev,
+                [name]: val
+            };
+
+            if ((name === 'first_name' || name === 'last_name') && !isUsernameEdited) {
+                const fName = name === 'first_name' ? val : prev.first_name;
+                const lName = name === 'last_name' ? val : prev.last_name;
+                const fTrans = transliterateArabicName(fName);
+                const lTrans = transliterateArabicName(lName);
+                if (fTrans || lTrans) {
+                    updated.username = fTrans && lTrans ? `${fTrans}.${lTrans}` : (fTrans || lTrans);
+                }
+            }
+            return updated;
+        });
         if (errorMessage) setErrorMessage('');
     };
 
@@ -97,6 +150,9 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, centers = [] }) => {
         }
         if (!formData.roles || formData.roles.length === 0) {
             return 'يجب اختيار دور واحد على الأقل للمستخدم';
+        }
+        if (formData.roles.includes('CENTER_MANAGER') && !formData.center_id) {
+            return 'عذراً، يجب تحديد المركز القرآني التابع له المستخدم عند إسناد دور (مدير مركز)';
         }
         if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
             return 'صيغة البريد الإلكتروني غير صحيحة';
@@ -528,7 +584,7 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated, centers = [] }) => {
 
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.88rem', fontWeight: 600, color: '#4a5568', marginBottom: '0.4rem' }}>
-                                        المركز القرآني
+                                        المركز القرآني {formData.roles.includes('CENTER_MANAGER') && <span style={{ color: '#e53e3e' }}>*</span>}
                                     </label>
                                     <select
                                         name="center_id"

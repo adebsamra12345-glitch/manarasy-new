@@ -3,11 +3,33 @@ import traceback
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from django.utils import timezone
+from django.db.models import Q
 from tenant_modules.halaqat.models import Halaqa
 from tenant_modules.users.models import UserProfile
 from tenant_modules.centers_and_projects.models import Project, ProjectStage, StagePart
 from .models import Student, Parent, StudentEnrollment, StudentRegistrationRequest, StudentDeletionRequest
 from .utils import resolve_stage_and_part, check_student_project_uniqueness
+
+def _get_requester_profile_helper(req, db):
+    import jwt as _jwt
+    auth = req.headers.get('Authorization') or req.META.get('HTTP_AUTHORIZATION', '')
+    if not auth.startswith('Bearer '):
+        return None, JsonResponse({'status': 'error', 'message': 'التوثيق مطلوب'}, status=401)
+    token = auth.split(' ', 1)[1]
+    try:
+        secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
+        payload = _jwt.decode(token, secret, algorithms=['HS256'])
+    except Exception:
+        return None, JsonResponse({'status': 'error', 'message': 'رمز التوثيق غير صالح أو منتهي الصلاحية'}, status=401)
+    user_id = payload.get('user_id')
+    if not user_id:
+        return None, JsonResponse({'status': 'error', 'message': 'بيانات التوثيق ناقصة'}, status=401)
+    try:
+        profile = UserProfile.objects.using(db).select_related('user').get(user__id=user_id)
+    except UserProfile.DoesNotExist:
+        return None, JsonResponse({'status': 'error', 'message': 'الملف الشخصي غير موجود'}, status=404)
+    return profile, None
 
 def parse_body(request):
     if not request.body:
@@ -539,7 +561,7 @@ def student_registration_request_view(request):
                 return JsonResponse({'status': 'error', 'message': 'غير مصرح لك بعرض هذه الطلبات'}, status=403)
 
             qs = StudentRegistrationRequest.objects.using(db_name).select_related(
-                'student', 'requested_by__user', 'halaqa', 'project', 'current_stage', 'current_part'
+                'student', 'requested_by__user', 'reviewed_by__user', 'halaqa', 'project', 'current_stage', 'current_part'
             ).order_by('-created_at')
 
             roles = profile.get_roles()
@@ -585,13 +607,19 @@ def student_registration_request_view(request):
                     'halaqa_name': req_obj.halaqa.name if req_obj.halaqa else None,
                     'project_id': str(req_obj.project.id) if req_obj.project else None,
                     'project_title': req_obj.project.title if req_obj.project else None,
+                    'stage_id': str(req_obj.current_stage.id) if req_obj.current_stage else None,
                     'stage_title': req_obj.current_stage.title if req_obj.current_stage else None,
+                    'part_id': str(req_obj.current_part.id) if req_obj.current_part else None,
                     'part_title': req_obj.current_part.title if req_obj.current_part else None,
                     'reached_page': req_obj.reached_page,
                     'requested_by_id': str(req_obj.requested_by.id) if req_obj.requested_by else None,
                     'requested_by_name': (
                         req_obj.requested_by.user.get_full_name() or req_obj.requested_by.user.username
                     ) if req_obj.requested_by else None,
+                    'reviewed_by_name': (
+                        req_obj.reviewed_by.user.get_full_name() or req_obj.reviewed_by.user.username
+                    ) if req_obj.reviewed_by else None,
+                    'rejection_reason': req_obj.rejection_reason,
                     'status': req_obj.status,
                     'created_at': req_obj.created_at.isoformat(),
                     'updated_at': req_obj.updated_at.isoformat(),
@@ -1189,4 +1217,312 @@ def student_deletion_request_view(request):
             return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء إرسال طلب الحذف', 'details': str(exc)}, status=500)
 
     return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+def approve_student_registration_request_view(request, request_id):
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    db_name = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db_name)
+    if err:
+        return err
+
+    roles = profile.get_roles() if profile else []
+    if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
+        return JsonResponse({'status': 'error', 'message': 'عذراً، هذه الصلاحية لمدير النظام أو مدير المركز فقط'}, status=403)
+
+    try:
+        reg_req = StudentRegistrationRequest.objects.using(db_name).select_related(
+            'halaqa', 'project', 'current_stage', 'current_part', 'requested_by__user'
+        ).get(id=request_id)
+
+        if reg_req.status not in ('PENDING', 'UNDER_REVIEW'):
+            return JsonResponse({'status': 'error', 'message': f'لا يمكن اتخاذ قرار على طلب بحالة: {reg_req.get_status_display()}'}, status=400)
+
+        if 'CENTER_MANAGER' in roles and 'TENANT_ADMIN' not in roles:
+            if profile.center and reg_req.halaqa and reg_req.halaqa.center != profile.center:
+                return JsonResponse({'status': 'error', 'message': 'غير مصرح لمدير المركز بالموافقة على طلبات خارج مركزه'}, status=403)
+
+        decision_date = timezone.now().strftime('%Y-%m-%d %H:%M')
+        reviewer_name = (profile.user.get_full_name() or profile.user.username) if profile and profile.user else 'مدير النظام'
+
+        if reg_req.request_type == 'UPDATE' and reg_req.student:
+            student = reg_req.student
+            if reg_req.full_name: student.full_name = reg_req.full_name
+            if reg_req.gender: student.gender = reg_req.gender
+            if reg_req.birth_date: student.birth_date = reg_req.birth_date
+            if reg_req.national_id: student.national_id = reg_req.national_id
+            if reg_req.registration_number: student.registration_number = reg_req.registration_number
+            if reg_req.is_orphan is not None: student.is_orphan = reg_req.is_orphan
+            if reg_req.has_special_needs is not None: student.has_special_needs = reg_req.has_special_needs
+            if reg_req.special_needs_notes: student.special_needs_notes = reg_req.special_needs_notes
+            if reg_req.mother_name: student.mother_name = reg_req.mother_name
+            if reg_req.mother_phone: student.mother_phone = reg_req.mother_phone
+            if reg_req.current_residence: student.current_residence = reg_req.current_residence
+            if reg_req.income_level: student.income_level = reg_req.income_level
+            if reg_req.general_notes: student.general_notes = reg_req.general_notes
+            if reg_req.reached_page: student.reached_page = reg_req.reached_page
+            if reg_req.halaqa: student.halaqa = reg_req.halaqa
+            student.save(using=db_name)
+            req_type_str = "طلب تعديل بيانات طالب"
+        else:
+            parent_obj = None
+            if reg_req.parent_name or reg_req.parent_phone:
+                parent_obj, _ = Parent.objects.using(db_name).get_or_create(
+                    full_name=reg_req.parent_name or "ولي أمر",
+                    defaults={"phone": reg_req.parent_phone or ""}
+                )
+
+            student, _ = Student.objects.using(db_name).get_or_create(
+                full_name=reg_req.full_name,
+                defaults={
+                    "parent": parent_obj,
+                    "halaqa": reg_req.halaqa,
+                    "gender": reg_req.gender or "M",
+                    "birth_date": reg_req.birth_date,
+                    "national_id": reg_req.national_id,
+                    "registration_number": reg_req.registration_number or f"STU-{reg_req.id.hex[:6].upper()}",
+                    "mother_name": reg_req.mother_name,
+                    "mother_phone": reg_req.mother_phone,
+                    "current_residence": reg_req.current_residence,
+                    "is_orphan": reg_req.is_orphan,
+                    "has_special_needs": reg_req.has_special_needs,
+                    "special_needs_notes": reg_req.special_needs_notes,
+                    "income_level": reg_req.income_level,
+                    "general_notes": reg_req.general_notes,
+                    "reached_page": reg_req.reached_page or 1
+                }
+            )
+            req_type_str = "طلب تسجيل طالب جديد"
+
+        if reg_req.halaqa:
+            StudentEnrollment.objects.using(db_name).update_or_create(
+                student=student,
+                halaqa=reg_req.halaqa,
+                defaults={
+                    "project": reg_req.project or reg_req.halaqa.project,
+                    "current_stage": reg_req.current_stage,
+                    "current_part": reg_req.current_part,
+                    "reached_page": reg_req.reached_page or 1,
+                    "is_active": True
+                }
+            )
+
+        reg_req.status = 'APPROVED'
+        reg_req.reviewed_by = profile
+        reg_req.save(using=db_name)
+
+        # إنشاء إشعار للمعلم صاحب الطلب عبر SystemNotification
+        if reg_req.requested_by and reg_req.requested_by.user:
+            from tenant_modules.centers_and_projects.models import SystemNotification
+            center_obj = reg_req.halaqa.center if reg_req.halaqa else (profile.center if profile else None)
+            SystemNotification.objects.using(db_name).create(
+                recipient=reg_req.requested_by.user,
+                center=center_obj,
+                title=f"الموافقة على {req_type_str}",
+                message=f"تمت الموافقة على {req_type_str} للطالب '{reg_req.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}."
+            )
+
+        return JsonResponse({
+            "status": "success",
+            "message": f"تمت الموافقة على {req_type_str} للطالب {reg_req.full_name} بنجاح",
+            "data": {
+                "id": str(reg_req.id),
+                "student_id": str(student.id),
+                "status": "APPROVED"
+            }
+        }, status=200)
+
+    except StudentRegistrationRequest.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "طلب التسجيل غير موجود"}, status=404)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "فشلت عملية الموافقة", "details": str(e)}, status=500)
+
+
+@csrf_exempt
+def reject_student_registration_request_view(request, request_id):
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    db_name = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db_name)
+    if err:
+        return err
+
+    roles = profile.get_roles() if profile else []
+    if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
+        return JsonResponse({'status': 'error', 'message': 'عذراً، هذه الصلاحية لمدير النظام أو مدير المركز فقط'}, status=403)
+
+    try:
+        reg_req = StudentRegistrationRequest.objects.using(db_name).select_related(
+            'halaqa', 'requested_by__user'
+        ).get(id=request_id)
+
+        if reg_req.status not in ('PENDING', 'UNDER_REVIEW'):
+            return JsonResponse({'status': 'error', 'message': f'لا يمكن اتخاذ قرار على طلب بحالة: {reg_req.get_status_display()}'}, status=400)
+
+        if 'CENTER_MANAGER' in roles and 'TENANT_ADMIN' not in roles:
+            if profile.center and reg_req.halaqa and reg_req.halaqa.center != profile.center:
+                return JsonResponse({'status': 'error', 'message': 'غير مصرح لمدير المركز برفض طلبات خارج مركزه'}, status=403)
+
+        data = parse_body(request)
+        rejection_reason = (data.get('rejection_reason') or '').strip()
+
+        reg_req.status = 'REJECTED'
+        reg_req.rejection_reason = rejection_reason or None
+        reg_req.reviewed_by = profile
+        reg_req.save(using=db_name)
+
+        decision_date = timezone.now().strftime('%Y-%m-%d %H:%M')
+        reviewer_name = (profile.user.get_full_name() or profile.user.username) if profile and profile.user else 'مدير النظام'
+        req_type_str = "طلب تعديل بيانات طالب" if reg_req.request_type == 'UPDATE' else "طلب تسجيل طالب جديد"
+
+        if reg_req.requested_by and reg_req.requested_by.user:
+            from tenant_modules.centers_and_projects.models import SystemNotification
+            center_obj = reg_req.halaqa.center if reg_req.halaqa else (profile.center if profile else None)
+            reason_suffix = f"\nسبب الرفض: {rejection_reason}" if rejection_reason else ""
+            SystemNotification.objects.using(db_name).create(
+                recipient=reg_req.requested_by.user,
+                center=center_obj,
+                title=f"رفض {req_type_str}",
+                message=f"تم رفض {req_type_str} للطالب '{reg_req.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}.{reason_suffix}"
+            )
+
+        return JsonResponse({
+            "status": "success",
+            "message": f"تم رفض {req_type_str} للطالب {reg_req.full_name}",
+            "data": {
+                "id": str(reg_req.id),
+                "status": "REJECTED"
+            }
+        }, status=200)
+
+    except StudentRegistrationRequest.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "طلب التسجيل غير موجود"}, status=404)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "فشلت عملية الرفض", "details": str(e)}, status=500)
+
+
+@csrf_exempt
+def approve_student_deletion_request_view(request, request_id):
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    db_name = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db_name)
+    if err:
+        return err
+
+    roles = profile.get_roles() if profile else []
+    if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
+        return JsonResponse({'status': 'error', 'message': 'عذراً، هذه الصلاحية لمدير النظام أو مدير المركز فقط'}, status=403)
+
+    try:
+        del_req = StudentDeletionRequest.objects.using(db_name).select_related(
+            'student', 'requested_by__user'
+        ).get(id=request_id)
+
+        if del_req.status not in ('PENDING', 'UNDER_REVIEW'):
+            return JsonResponse({'status': 'error', 'message': f'لا يمكن اتخاذ قرار على طلب بحالة: {del_req.get_status_display()}'}, status=400)
+
+        student = del_req.student
+
+        # إلغاء تفعيل التسجيلات وحذف الربط للحلقة
+        StudentEnrollment.objects.using(db_name).filter(student=student).update(is_active=False)
+        student.halaqa = None
+        student.save(using=db_name)
+
+        del_req.status = 'APPROVED'
+        del_req.reviewed_by = profile
+        del_req.save(using=db_name)
+
+        decision_date = timezone.now().strftime('%Y-%m-%d %H:%M')
+        reviewer_name = (profile.user.get_full_name() or profile.user.username) if profile and profile.user else 'مدير النظام'
+
+        if del_req.requested_by and del_req.requested_by.user:
+            from tenant_modules.centers_and_projects.models import SystemNotification
+            center_obj = student.halaqa.center if student and student.halaqa else (profile.center if profile else None)
+            SystemNotification.objects.using(db_name).create(
+                recipient=del_req.requested_by.user,
+                center=center_obj,
+                title="الموافقة على طلب حذف طالب",
+                message=f"تمت الموافقة على طلب حذف الطالب '{student.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}."
+            )
+
+        return JsonResponse({
+            "status": "success",
+            "message": f"تمت الموافقة على طلب حذف الطالب {student.full_name} بنجاح",
+            "data": {
+                "id": str(del_req.id),
+                "student_id": str(student.id),
+                "status": "APPROVED"
+            }
+        }, status=200)
+
+    except StudentDeletionRequest.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "طلب الحذف غير موجود"}, status=404)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "فشلت عملية الموافقة على طلب الحذف", "details": str(e)}, status=500)
+
+
+@csrf_exempt
+def reject_student_deletion_request_view(request, request_id):
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    db_name = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db_name)
+    if err:
+        return err
+
+    roles = profile.get_roles() if profile else []
+    if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
+        return JsonResponse({'status': 'error', 'message': 'عذراً، هذه الصلاحية لمدير النظام أو مدير المركز فقط'}, status=403)
+
+    try:
+        del_req = StudentDeletionRequest.objects.using(db_name).select_related(
+            'student', 'requested_by__user'
+        ).get(id=request_id)
+
+        if del_req.status not in ('PENDING', 'UNDER_REVIEW'):
+            return JsonResponse({'status': 'error', 'message': f'لا يمكن اتخاذ قرار على طلب بحالة: {del_req.get_status_display()}'}, status=400)
+
+        data = parse_body(request)
+        rejection_reason = (data.get('rejection_reason') or '').strip()
+
+        del_req.status = 'REJECTED'
+        del_req.rejection_reason = rejection_reason or None
+        del_req.reviewed_by = profile
+        del_req.save(using=db_name)
+
+        decision_date = timezone.now().strftime('%Y-%m-%d %H:%M')
+        reviewer_name = (profile.user.get_full_name() or profile.user.username) if profile and profile.user else 'مدير النظام'
+
+        if del_req.requested_by and del_req.requested_by.user:
+            from tenant_modules.centers_and_projects.models import SystemNotification
+            center_obj = del_req.student.halaqa.center if del_req.student and del_req.student.halaqa else (profile.center if profile else None)
+            reason_suffix = f"\nسبب الرفض: {rejection_reason}" if rejection_reason else ""
+            SystemNotification.objects.using(db_name).create(
+                recipient=del_req.requested_by.user,
+                center=center_obj,
+                title="رفض طلب حذف طالب",
+                message=f"تم رفض طلب حذف الطالب '{del_req.student.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}.{reason_suffix}"
+            )
+
+        return JsonResponse({
+            "status": "success",
+            "message": f"تم رفض طلب حذف الطالب {del_req.student.full_name}",
+            "data": {
+                "id": str(del_req.id),
+                "status": "REJECTED"
+            }
+        }, status=200)
+
+    except StudentDeletionRequest.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "طلب الحذف غير موجود"}, status=404)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "فشلت عملية الرفض", "details": str(e)}, status=500)
+
 

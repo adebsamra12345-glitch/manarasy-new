@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import make_password, check_password
 
 from core_system.tenants.models import Tenant
 from tenant_modules.centers_and_projects.models import Center
@@ -22,12 +22,12 @@ def parse_body(request):
     try:
         return json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
-        raise ValueError("صيغة البيانات في الطلب غير صالحة")
+        raise ValueError("طµظٹط؛ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ ظپظٹ ط§ظ„ط·ظ„ط¨ ط؛ظٹط± طµط§ظ„ط­ط©")
 
 def get_tenant_db(request):
     tenant_id = request.headers.get('Tenant-ID')
     if not tenant_id:
-        raise ValueError("ترويسة Tenant-ID مفقودة في الطلب")
+        raise ValueError("طھط±ظˆظٹط³ط© Tenant-ID ظ…ظپظ‚ظˆط¯ط© ظپظٹ ط§ظ„ط·ظ„ط¨")
     
     tenant = Tenant.objects.using('default').get(id=tenant_id)
     db_name = tenant.db_name
@@ -60,6 +60,7 @@ def serialize_profile(prof):
     if not prof:
         return {}
     
+    db_name = prof._state.db
     enrollments_data = []
     if hasattr(prof, 'enrollments'):
         for en in prof.enrollments.filter(is_active=True).select_related('halaqa__project', 'current_stage', 'current_part'):
@@ -76,7 +77,7 @@ def serialize_profile(prof):
                 "part_title": en.current_part.title if en.current_part else None,
             })
 
-    return {
+    data = {
         "father_name": prof.father_name,
         "mother_name": prof.mother_name,
         "mother_last_name": prof.mother_last_name,
@@ -95,6 +96,51 @@ def serialize_profile(prof):
         "enrollments": enrollments_data
     }
 
+    # Retrieve all student specific fields if they exist
+    from tenant_modules.students_and_parents.models import Student, Parent as StudentParentModel
+    if prof.role == 'STUDENT' or 'STUDENT' in prof.get_roles():
+        try:
+            # Try finding student via enrollments first
+            student_obj = None
+            first_en = prof.enrollments.first()
+            if first_en and first_en.student:
+                student_obj = first_en.student
+            else:
+                # Try finding by name or other relations
+                full_name_lookup = f"{prof.user.first_name} {prof.user.last_name}".strip()
+                student_obj = Student.objects.using(db_name).filter(full_name=full_name_lookup).first()
+            
+            if student_obj:
+                student_fields = ['national_id', 'birth_date', 'gender', 'registration_number', 
+                                  'current_residence', 'points', 'rating', 'is_orphan', 
+                                  'has_special_needs', 'special_needs_notes', 'income_level', 'general_notes']
+                for field in student_fields:
+                    val = getattr(student_obj, field, None)
+                    if val is not None:
+                        # Ensure date serialization
+                        if hasattr(val, 'isoformat'):
+                            val = val.isoformat()
+                        data[field] = val
+        except Exception as e:
+            pass
+            
+    if prof.role == 'PARENT' or 'PARENT' in prof.get_roles():
+        try:
+            full_name_lookup = f"{prof.user.first_name} {prof.user.last_name}".strip()
+            parent_obj = StudentParentModel.objects.using(db_name).filter(
+                phone=prof.phone or prof.father_phone or prof.mother_phone
+            ).first()
+            if not parent_obj:
+                parent_obj = StudentParentModel.objects.using(db_name).filter(full_name=full_name_lookup).first()
+                
+            if parent_obj:
+                data['parent_email'] = parent_obj.email
+                # We can add more parent fields if added to the model later
+        except Exception:
+            pass
+
+    return data
+
 
 # ==============================================================================
 # Execution Helpers
@@ -102,7 +148,7 @@ def serialize_profile(prof):
 
 def check_existing_parent(db_name, guardian_name, guardian_last_name, guardian_type='FATHER'):
     """
-    البحث عن ولي أمر نشط يملك نفس (اسم الولي المختار واسم العائلة)
+    ط§ظ„ط¨ط­ط« ط¹ظ† ظˆظ„ظٹ ط£ظ…ط± ظ†ط´ط· ظٹظ…ظ„ظƒ ظ†ظپط³ (ط§ط³ظ… ط§ظ„ظˆظ„ظٹ ط§ظ„ظ…ط®طھط§ط± ظˆط§ط³ظ… ط§ظ„ط¹ط§ط¦ظ„ط©)
     """
     g_name = guardian_name.strip() if guardian_name else ''
     l_name = guardian_last_name.strip() if guardian_last_name else ''
@@ -128,7 +174,7 @@ def check_existing_parent(db_name, guardian_name, guardian_last_name, guardian_t
 
 
 def execute_user_creation(db_name, data):
-    """إنشاء حساب مستخدم جديد والتأكد من القواعد والإنشاء التلقائي لولي الأمر"""
+    """ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ظ…ط³طھط®ط¯ظ… ط¬ط¯ظٹط¯ ظˆط§ظ„طھط£ظƒط¯ ظ…ظ† ط§ظ„ظ‚ظˆط§ط¹ط¯ ظˆط§ظ„ط¥ظ†ط´ط§ط، ط§ظ„طھظ„ظ‚ط§ط¦ظٹ ظ„ظˆظ„ظٹ ط§ظ„ط£ظ…ط±"""
     username = data.get('username', '').strip() if data.get('username') else ''
     password = data.get('password', '').strip()
     role = data.get('role', 'STUDENT')
@@ -178,14 +224,17 @@ def execute_user_creation(db_name, data):
     if isinstance(is_active, str):
         is_active = is_active.lower() in ['true', '1', 'yes']
 
+    if ('CENTER_MANAGER' in roles or role == 'CENTER_MANAGER') and not center_id:
+        raise ValueError("ط¹ط°ط±ط§ظ‹طŒ ظٹط¬ط¨ طھط­ط¯ظٹط¯ ط§ظ„ظ…ط±ظƒط² ط§ظ„ظ‚ط±ط¢ظ†ظٹ ط§ظ„طھط§ط¨ط¹ ظ„ظ‡ ط§ظ„ظ…ط³طھط®ط¯ظ… ط¹ظ†ط¯ ط§ط®طھظٹط§ط± ط¯ظˆط± (ظ…ط¯ظٹط± ظ…ط±ظƒط²)")
+
     if ('STUDENT' in roles or role == 'STUDENT') and guardian_type == 'MOTHER':
         if not mother_name or not mother_last_name:
-            raise ValueError("عذراً، لا يمكن اختيار الأم كولي أمر إلا في حال إدخال اسم الأم وكنيتها")
+            raise ValueError("ط¹ط°ط±ط§ظ‹طŒ ظ„ط§ ظٹظ…ظƒظ† ط§ط®طھظٹط§ط± ط§ظ„ط£ظ… ظƒظˆظ„ظٹ ط£ظ…ط± ط¥ظ„ط§ ظپظٹ ط­ط§ظ„ ط¥ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ط£ظ… ظˆظƒظ†ظٹطھظ‡ط§")
 
-    # توليد اسم المستخدم تلقائياً في حال عدم تمريره
+    # طھظˆظ„ظٹط¯ ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ظپظٹ ط­ط§ظ„ ط¹ط¯ظ… طھظ…ط±ظٹط±ظ‡
     if not username:
         if not first_name and not last_name:
-            raise ValueError("يجب إدخال اسم المستخدم أو (الاسم الأول والكنية)")
+            raise ValueError("ظٹط¬ط¨ ط¥ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… ط£ظˆ (ط§ظ„ط§ط³ظ… ط§ظ„ط£ظˆظ„ ظˆط§ظ„ظƒظ†ظٹط©)")
         base_username = f"{first_name}_{last_name}".strip('_').replace(' ', '_')
         username = base_username
         counter = 1
@@ -194,22 +243,27 @@ def execute_user_creation(db_name, data):
             counter += 1
 
     if not password or not role:
-        raise ValueError("كلمة المرور والدور مطلوبان")
+        raise ValueError("ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ظˆط§ظ„ط¯ظˆط± ظ…ط·ظ„ظˆط¨ط§ظ†")
 
     if data.get('username') and User.objects.using(db_name).filter(username=username).exists():
-        raise ValueError(f"اسم المستخدم '{username}' مستخدم بالفعل في النظام")
+        alt_counter = 1
+        suggested_username = f"{username}{alt_counter}"
+        while User.objects.using(db_name).filter(username=suggested_username).exists():
+            alt_counter += 1
+            suggested_username = f"{username}{alt_counter}"
+        raise ValueError(f"ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… '{username}' ظ…ط³طھط®ط¯ظ… ط¨ط§ظ„ظپط¹ظ„ ظپظٹ ط§ظ„ظ†ط¸ط§ظ…. ظٹظڈظ‚طھط±ط­ ط§ط³طھط®ط¯ط§ظ…: '{suggested_username}'")
 
     center = None
     if center_id:
         try:
             center = Center.objects.using(db_name).get(id=center_id)
         except Center.DoesNotExist:
-            raise ValueError("المركز المحدد غير موجود")
+            raise ValueError("ط§ظ„ظ…ط±ظƒط² ط§ظ„ظ…ط­ط¯ط¯ ط؛ظٹط± ظ…ظˆط¬ظˆط¯")
 
-    # قاعدة مدير المركز الواحد: لا يمكن أن يكون للمركز أكثر من مدير واحد
+    # ظ‚ط§ط¹ط¯ط© ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط§ظ„ظˆط§ط­ط¯: ظ„ط§ ظٹظ…ظƒظ† ط£ظ† ظٹظƒظˆظ† ظ„ظ„ظ…ط±ظƒط² ط£ظƒط«ط± ظ…ظ† ظ…ط¯ظٹط± ظˆط§ط­ط¯
     if ('CENTER_MANAGER' in roles or role == 'CENTER_MANAGER') and center:
         if center.manager and center.manager.is_active:
-            raise ValueError(f"المركز '{center.name}' يملك مديراً بالفعل ولا يمكن إضافة أكثر من مدير واحد للمركز")
+            raise ValueError(f"ط§ظ„ظ…ط±ظƒط² '{center.name}' ظٹظ…ظ„ظƒ ظ…ط¯ظٹط±ط§ظ‹ ط¨ط§ظ„ظپط¹ظ„ ظˆظ„ط§ ظٹظ…ظƒظ† ط¥ط¶ط§ظپط© ط£ظƒط«ط± ظ…ظ† ظ…ط¯ظٹط± ظˆط§ط­ط¯ ظ„ظ„ظ…ط±ظƒط²")
 
     user = User.objects.using(db_name).create(
         username=username,
@@ -249,7 +303,7 @@ def execute_user_creation(db_name, data):
 
     parent_profile = None
 
-    # الإنشاء التلقائي أو الربط بحساب ولي الأمر عند إنشاء حساب طالب
+    # ط§ظ„ط¥ظ†ط´ط§ط، ط§ظ„طھظ„ظ‚ط§ط¦ظٹ ط£ظˆ ط§ظ„ط±ط¨ط· ط¨ط­ط³ط§ط¨ ظˆظ„ظٹ ط§ظ„ط£ظ…ط± ط¹ظ†ط¯ ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ط·ط§ظ„ط¨
     if role == 'STUDENT':
         existing_parent_id = data.get('existing_parent_id')
         parent_user = None
@@ -264,7 +318,7 @@ def execute_user_creation(db_name, data):
             except User.DoesNotExist:
                 parent_user = None
 
-        # إنشاء ولي أمر جديد إذا لم يُحدّد حساب ولي أمر موجود
+        # ط¥ظ†ط´ط§ط، ظˆظ„ظٹ ط£ظ…ط± ط¬ط¯ظٹط¯ ط¥ط°ط§ ظ„ظ… ظٹظڈط­ط¯ظ‘ط¯ ط­ط³ط§ط¨ ظˆظ„ظٹ ط£ظ…ط± ظ…ظˆط¬ظˆط¯
         if not parent_user:
             import random
             target_g_name = mother_name if guardian_type == 'MOTHER' else father_name
@@ -280,11 +334,11 @@ def execute_user_creation(db_name, data):
                 parent_username = f"{base_parent_name}_{rand_num}"
 
             if guardian_type == 'MOTHER':
-                p_first_name = mother_name if mother_name else f"أم {first_name}"
+                p_first_name = mother_name if mother_name else f"ط£ظ… {first_name}"
                 p_last_name = mother_last_name if mother_last_name else last_name
                 p_phone = mother_phone or phone
             else:
-                p_first_name = father_name if father_name else f"ولي أمر {first_name}"
+                p_first_name = father_name if father_name else f"ظˆظ„ظٹ ط£ظ…ط± {first_name}"
                 p_last_name = last_name
                 p_phone = father_phone or phone
 
@@ -313,7 +367,7 @@ def execute_user_creation(db_name, data):
         profile.parent_user = parent_user
         profile.save(using=db_name)
 
-        # تزامن السجل أيضاً مع جدولي Student و Parent إن وُجدا
+        # طھط²ط§ظ…ظ† ط§ظ„ط³ط¬ظ„ ط£ظٹط¶ط§ظ‹ ظ…ط¹ ط¬ط¯ظˆظ„ظٹ Student ظˆ Parent ط¥ظ† ظˆظڈط¬ط¯ط§
         try:
             sp_parent, _ = StudentParentModel.objects.using(db_name).get_or_create(
                 phone=father_phone or phone or '00000000',
@@ -362,9 +416,9 @@ def execute_user_creation(db_name, data):
 
 
 def execute_user_update(db_name, user, data):
-    """تعديل بيانات المستخدم والحماية لحساب manager الافتراضي"""
+    """طھط¹ط¯ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ… ظˆط§ظ„ط­ظ…ط§ظٹط© ظ„ط­ط³ط§ط¨ manager ط§ظ„ط§ظپطھط±ط§ط¶ظٹ"""
     if user.username == 'manager':
-        raise ValueError("لا يمكن تعديل أو حذف بيانات الأدمن الافتراضي manager")
+        raise ValueError("ظ„ط§ ظٹظ…ظƒظ† طھط¹ط¯ظٹظ„ ط£ظˆ ط­ط°ظپ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط§ظپطھط±ط§ط¶ظٹ manager")
 
     try:
         profile = UserProfile.objects.using(db_name).get(user=user)
@@ -374,7 +428,7 @@ def execute_user_update(db_name, user, data):
     if 'username' in data and data['username'] and data['username'].strip() != user.username:
         new_username = data['username'].strip()
         if User.objects.using(db_name).filter(username=new_username).exclude(id=user.id).exists():
-            raise ValueError(f"اسم المستخدم '{new_username}' مستخدم بالفعل في النظام")
+            raise ValueError(f"ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… '{new_username}' ظ…ط³طھط®ط¯ظ… ط¨ط§ظ„ظپط¹ظ„ ظپظٹ ط§ظ„ظ†ط¸ط§ظ…")
         user.username = new_username
 
     if 'first_name' in data:
@@ -396,7 +450,7 @@ def execute_user_update(db_name, user, data):
     if 'roles' in data:
         new_roles = data['roles']
         if not new_roles or not isinstance(new_roles, list) or len(new_roles) == 0:
-            raise ValueError("يجب اختيار دور واحد على الأقل للمستخدم")
+            raise ValueError("ظٹط¬ط¨ ط§ط®طھظٹط§ط± ط¯ظˆط± ظˆط§ط­ط¯ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„ ظ„ظ„ظ…ط³طھط®ط¯ظ…")
         profile.set_roles(new_roles)
     elif 'role' in data:
         profile.set_roles([data['role']])
@@ -440,7 +494,7 @@ def execute_user_update(db_name, user, data):
         if data['center_id']:
             center = Center.objects.using(db_name).get(id=data['center_id'])
             if 'CENTER_MANAGER' in profile.get_roles() and center.manager and center.manager != user:
-                raise ValueError("لا يمكن إسناد مدير مركز جديد لمركز يملك مديراً بالفعل")
+                raise ValueError("ظ„ط§ ظٹظ…ظƒظ† ط¥ط³ظ†ط§ط¯ ظ…ط¯ظٹط± ظ…ط±ظƒط² ط¬ط¯ظٹط¯ ظ„ظ…ط±ظƒط² ظٹظ…ظ„ظƒ ظ…ط¯ظٹط±ط§ظ‹ ط¨ط§ظ„ظپط¹ظ„")
             profile.center = center
             if 'CENTER_MANAGER' in profile.get_roles():
                 center.manager = user
@@ -448,14 +502,18 @@ def execute_user_update(db_name, user, data):
         else:
             profile.center = None
 
+    if 'CENTER_MANAGER' in profile.get_roles() or profile.role == 'CENTER_MANAGER':
+        if not profile.center:
+            raise ValueError("ط¹ط°ط±ط§ظ‹طŒ ظٹط¬ط¨ طھط­ط¯ظٹط¯ ط§ظ„ظ…ط±ظƒط² ط§ظ„ظ‚ط±ط¢ظ†ظٹ ط§ظ„طھط§ط¨ط¹ ظ„ظ‡ ط§ظ„ظ…ط³طھط®ط¯ظ… ط¹ظ†ط¯ ط¥ط³ظ†ط§ط¯ ط¯ظˆط± (ظ…ط¯ظٹط± ظ…ط±ظƒط²)")
+
     profile.save(using=db_name)
     return user, profile
 
 
 def execute_user_delete(db_name, user):
-    """الحذف اللطيف للمستخدم بدون حذف فيزيائي مع حماية manager"""
+    """ط§ظ„ط­ط°ظپ ط§ظ„ظ„ط·ظٹظپ ظ„ظ„ظ…ط³طھط®ط¯ظ… ط¨ط¯ظˆظ† ط­ط°ظپ ظپظٹط²ظٹط§ط¦ظٹ ظ…ط¹ ط­ظ…ط§ظٹط© manager"""
     if user.username == 'manager':
-        raise ValueError("لا يمكن تعديل أو حذف بيانات الأدمن الافتراضي manager")
+        raise ValueError("ظ„ط§ ظٹظ…ظƒظ† طھط¹ط¯ظٹظ„ ط£ظˆ ط­ط°ظپ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط§ظپطھط±ط§ط¶ظٹ manager")
 
     user.is_active = False
     user.save(using=db_name)
@@ -470,7 +528,7 @@ def execute_user_delete(db_name, user):
             profile.center.manager = None
             profile.center.save(using=db_name)
 
-        # التعامل مع تبعات حذف المعلم: إلغاء إسناد الحلقات المرتبطة به
+        # ط§ظ„طھط¹ط§ظ…ظ„ ظ…ط¹ طھط¨ط¹ط§طھ ط­ط°ظپ ط§ظ„ظ…ط¹ظ„ظ…: ط¥ظ„ط؛ط§ط، ط¥ط³ظ†ط§ط¯ ط§ظ„ط­ظ„ظ‚ط§طھ ط§ظ„ظ…ط±طھط¨ط·ط© ط¨ظ‡
         if profile.role == 'TEACHER' or 'TEACHER' in profile.get_roles():
             from tenant_modules.halaqat.models import Halaqa
             full_name = f"{user.first_name} {user.last_name}".strip()
@@ -478,7 +536,7 @@ def execute_user_delete(db_name, user):
             for identifier in teacher_identifiers:
                 Halaqa.objects.using(db_name).filter(teacher_name__iexact=identifier).update(teacher_name='')
 
-        # إلغاء تنشيط حساب الأب تلقائياً إذا كان المستخدم طالب وليس للأب أبناء آخرين نشطين
+        # ط¥ظ„ط؛ط§ط، طھظ†ط´ظٹط· ط­ط³ط§ط¨ ط§ظ„ط£ط¨ طھظ„ظ‚ط§ط¦ظٹط§ظ‹ ط¥ط°ط§ ظƒط§ظ† ط§ظ„ظ…ط³طھط®ط¯ظ… ط·ط§ظ„ط¨ ظˆظ„ظٹط³ ظ„ظ„ط£ط¨ ط£ط¨ظ†ط§ط، ط¢ط®ط±ظٹظ† ظ†ط´ط·ظٹظ†
         if profile.role == 'STUDENT' and profile.parent_user:
             parent_user = profile.parent_user
             has_other_active_children = UserProfile.objects.using(db_name).filter(
@@ -515,7 +573,7 @@ def user_list_create_view(request):
 
     token_payload = get_token_payload(request)
     if not token_payload:
-        return JsonResponse({"status": "error", "message": "التوكن مفقود أو غير صالحة"}, status=401)
+        return JsonResponse({"status": "error", "message": "ط§ظ„طھظˆظƒظ† ظ…ظپظ‚ظˆط¯ ط£ظˆ ط؛ظٹط± طµط§ظ„ط­ط©"}, status=401)
 
     requester_role = token_payload.get('role')
     requester_username = token_payload.get('username')
@@ -527,8 +585,10 @@ def user_list_create_view(request):
         requester_profile = None
 
     if request.method == 'GET':
+        role_param = request.GET.get('role')
+        if requester_role != 'TENANT_ADMIN' and role_param != 'TEACHER':
+            return JsonResponse({"status": "error", "message": "ط¹ط°ط±ط§ظ‹طŒ ط§ظ„ظˆطµظˆظ„ ظ„طµظپط­ط© ظˆط¥ط¬ط±ط§ط،ط§طھ ط¥ط¯ط§ط±ط© ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ† ظ…طھط§ط­ ظپظ‚ط· ظ„ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط±ط¦ظٹط³ظٹ"}, status=403)
         try:
-            role_param = request.GET.get('role')
             center_id_param = request.GET.get('center_id')
             status_param = request.GET.get('status')
 
@@ -581,9 +641,11 @@ def user_list_create_view(request):
                 res.append(item)
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "خطأ عند استرجاع قائمة الحسابات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "ط®ط·ط£ ط¹ظ†ط¯ ط§ط³طھط±ط¬ط§ط¹ ظ‚ط§ط¦ظ…ط© ط§ظ„ط­ط³ط§ط¨ط§طھ", "details": str(e)}, status=500)
 
     elif request.method == 'POST':
+        if requester_role != 'TENANT_ADMIN':
+            return JsonResponse({"status": "error", "message": "ط¹ط°ط±ط§ظ‹طŒ ط¥ط¶ط§ظپط© ط­ط³ط§ط¨ط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ† ظ…طھط§ط­ ظپظ‚ط· ظ„ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط±ط¦ظٹط³ظٹ"}, status=403)
         try:
             data = parse_body(request)
             target_role = data.get('role', 'STUDENT')
@@ -598,24 +660,24 @@ def user_list_create_view(request):
 
             guardian_name = mother_name if guardian_type == 'MOTHER' else father_name
             guardian_last_name = (mother_last_name if mother_last_name else last_name) if guardian_type == 'MOTHER' else last_name
-            guardian_title = "الأم" if guardian_type == 'MOTHER' else "الأب"
+            guardian_title = "ط§ظ„ط£ظ…" if guardian_type == 'MOTHER' else "ط§ظ„ط£ط¨"
 
-            # منع اختيار الأم كولي أمر إلا عند أدخال اسم الأم وكنيتها
+            # ظ…ظ†ط¹ ط§ط®طھظٹط§ط± ط§ظ„ط£ظ… ظƒظˆظ„ظٹ ط£ظ…ط± ط¥ظ„ط§ ط¹ظ†ط¯ ط£ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ط£ظ… ظˆظƒظ†ظٹطھظ‡ط§
             if target_role == 'STUDENT' and guardian_type == 'MOTHER':
                 if not mother_name.strip() or not mother_last_name.strip():
                     return JsonResponse({
                         "status": "error",
-                        "message": "عذراً، لا يمكن اختيار الأم كولي أمر إلا في حال إدخال اسم الأم وكنيتها"
+                        "message": "ط¹ط°ط±ط§ظ‹طŒ ظ„ط§ ظٹظ…ظƒظ† ط§ط®طھظٹط§ط± ط§ظ„ط£ظ… ظƒظˆظ„ظٹ ط£ظ…ط± ط¥ظ„ط§ ظپظٹ ط­ط§ظ„ ط¥ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ط£ظ… ظˆظƒظ†ظٹطھظ‡ط§"
                     }, status=400)
 
-            # التحقق من وجود ولي أمر مطابق عند إنشاء طالب إذا لم يتم تأكيد الاختيار
+            # ط§ظ„طھط­ظ‚ظ‚ ظ…ظ† ظˆط¬ظˆط¯ ظˆظ„ظٹ ط£ظ…ط± ظ…ط·ط§ط¨ظ‚ ط¹ظ†ط¯ ط¥ظ†ط´ط§ط، ط·ط§ظ„ط¨ ط¥ط°ط§ ظ„ظ… ظٹطھظ… طھط£ظƒظٹط¯ ط§ظ„ط§ط®طھظٹط§ط±
             if target_role == 'STUDENT' and not existing_parent_id and not create_new_parent:
                 existing_p = check_existing_parent(db_name, guardian_name, guardian_last_name, guardian_type)
                 if existing_p:
                     ex_user, ex_prof = existing_p
                     return JsonResponse({
                         "status": "warning_parent_exists",
-                        "message": f"تنبيه: يوجد ولي أمر مسجل بالفعل باسم '{ex_user.first_name} {ex_user.last_name}' (اسم المستخدم: {ex_user.username}). هل ترغب في ربط هذا الطالب بالحساب الحالي كـ ({guardian_title}) أم إنشاء حساب ولي أمر جديد؟",
+                        "message": f"طھظ†ط¨ظٹظ‡: ظٹظˆط¬ط¯ ظˆظ„ظٹ ط£ظ…ط± ظ…ط³ط¬ظ„ ط¨ط§ظ„ظپط¹ظ„ ط¨ط§ط³ظ… '{ex_user.first_name} {ex_user.last_name}' (ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…: {ex_user.username}). ظ‡ظ„ طھط±ط؛ط¨ ظپظٹ ط±ط¨ط· ظ‡ط°ط§ ط§ظ„ط·ط§ظ„ط¨ ط¨ط§ظ„ط­ط³ط§ط¨ ط§ظ„ط­ط§ظ„ظٹ ظƒظ€ ({guardian_title}) ط£ظ… ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ظˆظ„ظٹ ط£ظ…ط± ط¬ط¯ظٹط¯طں",
                         "requires_parent_confirmation": True,
                         "guardian_type": guardian_type,
                         "existing_parent": {
@@ -626,20 +688,20 @@ def user_list_create_view(request):
                         }
                     }, status=400)
 
-            # 1. المعلم تقديم طلب فقط دون التنفيذ الفعلي
+            # 1. ط§ظ„ظ…ط¹ظ„ظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ظپظ‚ط· ط¯ظˆظ† ط§ظ„طھظ†ظپظٹط° ط§ظ„ظپط¹ظ„ظٹ
             if requester_role == 'TEACHER':
                 if target_role != 'STUDENT':
-                    return JsonResponse({"status": "error", "message": "لا يحق للمعلم تقديم طلب لغير حسابات الطلاب"}, status=403)
+                    return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ„ظ…ط¹ظ„ظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ظ„ط؛ظٹط± ط­ط³ط§ط¨ط§طھ ط§ظ„ط·ظ„ط§ط¨"}, status=403)
 
-                # إضافة ملاحظة التنبيه في بيانات الطلب للظهور للأدمن ومدير المركز
+                # ط¥ط¶ط§ظپط© ظ…ظ„ط§ط­ط¸ط© ط§ظ„طھظ†ط¨ظٹظ‡ ظپظٹ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط·ظ„ط¨ ظ„ظ„ط¸ظ‡ظˆط± ظ„ظ„ط£ط¯ظ…ظ† ظˆظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط²
                 if existing_parent_id:
                     try:
                         ex_u = User.objects.using(db_name).get(id=existing_parent_id)
-                        data['parent_note'] = f"ملاحظة المعلم: قام المعلم باختيار ربط الطالب بولي الأمر الحالي '{ex_u.first_name} {ex_u.last_name}' ({ex_u.username}) كـ ({guardian_title})."
+                        data['parent_note'] = f"ظ…ظ„ط§ط­ط¸ط© ط§ظ„ظ…ط¹ظ„ظ…: ظ‚ط§ظ… ط§ظ„ظ…ط¹ظ„ظ… ط¨ط§ط®طھظٹط§ط± ط±ط¨ط· ط§ظ„ط·ط§ظ„ط¨ ط¨ظˆظ„ظٹ ط§ظ„ط£ظ…ط± ط§ظ„ط­ط§ظ„ظٹ '{ex_u.first_name} {ex_u.last_name}' ({ex_u.username}) ظƒظ€ ({guardian_title})."
                     except Exception:
                         pass
                 elif create_new_parent:
-                    data['parent_note'] = f"ملاحظة المعلم: اختار المعلم إنشاء حساب ولي أمر جديد ({guardian_title}) رغم وجود حساب آخر بنفس الاسم."
+                    data['parent_note'] = f"ظ…ظ„ط§ط­ط¸ط© ط§ظ„ظ…ط¹ظ„ظ…: ط§ط®طھط§ط± ط§ظ„ظ…ط¹ظ„ظ… ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ظˆظ„ظٹ ط£ظ…ط± ط¬ط¯ظٹط¯ ({guardian_title}) ط±ط؛ظ… ظˆط¬ظˆط¯ ط­ط³ط§ط¨ ط¢ط®ط± ط¨ظ†ظپط³ ط§ظ„ط§ط³ظ…."
 
                 center = requester_profile.center if requester_profile else None
                 account_req = AccountRequest.objects.using(db_name).create(
@@ -652,21 +714,21 @@ def user_list_create_view(request):
 
                 return JsonResponse({
                     "status": "pending_approval",
-                    "message": "تم تقديم طلب إنشاء حساب الطالب بنجاح، بانتظار موافقة مدير المركز أو الأدمن الرئيسي",
+                    "message": "طھظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ط§ظ„ط·ط§ظ„ط¨ ط¨ظ†ط¬ط§ط­طŒ ط¨ط§ظ†طھط¸ط§ط± ظ…ظˆط§ظپظ‚ط© ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط£ظˆ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ",
                     "request_id": str(account_req.id)
                 }, status=202)
 
-            # 2. مدير المركز يمنع من إنشاء أدمن أو مدير مركز آخر
+            # 2. ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظٹظ…ظ†ط¹ ظ…ظ† ط¥ظ†ط´ط§ط، ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ظ…ط±ظƒط² ط¢ط®ط±
             if requester_role == 'CENTER_MANAGER':
                 if target_role in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-                    return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز إنشاء حسابات أدمن رئيسي أو مدراء مراكز آخرين"}, status=403)
+                    return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ط§طھ ط£ط¯ظ…ظ† ط±ط¦ظٹط³ظٹ ط£ظˆ ظ…ط¯ط±ط§ط، ظ…ط±ط§ظƒط² ط¢ط®ط±ظٹظ†"}, status=403)
                 
                 if requester_profile and requester_profile.center:
                     data['center_id'] = str(requester_profile.center.id)
 
-            # 3. الأدمن الرئيسي يملك كامل الصلاحية
+            # 3. ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ ظٹظ…ظ„ظƒ ظƒط§ظ…ظ„ ط§ظ„طµظ„ط§ط­ظٹط©
             if requester_role not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-                return JsonResponse({"status": "error", "message": "صلاحيات الأدمن أو مدير المركز مطلوبة لإنشاء حسابات"}, status=403)
+                return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ…ط·ظ„ظˆط¨ط© ظ„ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ط§طھ"}, status=403)
 
             user, profile, parent_profile = execute_user_creation(db_name, data)
 
@@ -688,14 +750,14 @@ def user_list_create_view(request):
 
             return JsonResponse({
                 "status": "success",
-                "message": "تم إنشاء الحساب بنجاح",
+                "message": "طھظ… ط¥ظ†ط´ط§ط، ط§ظ„ط­ط³ط§ط¨ ط¨ظ†ط¬ط§ط­",
                 "data": resp_data
             }, status=201)
 
         except ValueError as e:
             return JsonResponse({"status": "error", "message": str(e)}, status=400)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ غير متوقع أثناء إنشاء الحساب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "ط­ط¯ط« ط®ط·ط£ ط؛ظٹط± ظ…طھظˆظ‚ط¹ ط£ط«ظ†ط§ط، ط¥ظ†ط´ط§ط، ط§ظ„ط­ط³ط§ط¨", "details": str(e)}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -709,7 +771,7 @@ def user_detail_view(request, pk):
 
     token_payload = get_token_payload(request)
     if not token_payload:
-        return JsonResponse({"status": "error", "message": "التوكن مفقود أو غير صالحة"}, status=401)
+        return JsonResponse({"status": "error", "message": "ط§ظ„طھظˆظƒظ† ظ…ظپظ‚ظˆط¯ ط£ظˆ ط؛ظٹط± طµط§ظ„ط­ط©"}, status=401)
 
     requester_role = token_payload.get('role')
     requester_username = token_payload.get('username')
@@ -724,19 +786,16 @@ def user_detail_view(request, pk):
         target_user = User.objects.using(db_name).get(id=pk)
         target_profile = UserProfile.objects.using(db_name).get(user=target_user)
     except User.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "الحساب المطلوب غير موجود"}, status=404)
+        return JsonResponse({"status": "error", "message": "ط§ظ„ط­ط³ط§ط¨ ط§ظ„ظ…ط·ظ„ظˆط¨ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"}, status=404)
     except UserProfile.DoesNotExist:
         target_profile = UserProfile.objects.using(db_name).create(user=target_user, role='STUDENT')
 
-    if requester_role == 'CENTER_MANAGER':
-        if not requester_profile or not requester_profile.center or target_profile.center != requester_profile.center:
-            return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز الوصول لحسابات خارج مركزه"}, status=403)
-        if target_profile.role == 'TENANT_ADMIN' or 'TENANT_ADMIN' in target_profile.get_roles():
-            return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز الوصول لحسابات الأدمن الرئيسي"}, status=403)
+    if requester_role != 'TENANT_ADMIN':
+        return JsonResponse({"status": "error", "message": "ط¹ط°ط±ط§ظ‹طŒ ط§ظ„ظˆطµظˆظ„ ظ„ط¨ظٹط§ظ†ط§طھ ظˆط¥ط¬ط±ط§ط،ط§طھ ط¥ط¯ط§ط±ط© ظ‡ط°ط§ ط§ظ„ظ…ط³طھط®ط¯ظ… ظ…طھط§ط­ ظپظ‚ط· ظ„ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط±ط¦ظٹط³ظٹ"}, status=403)
 
-    # حماية manager الافتراضي
+    # ط­ظ…ط§ظٹط© manager ط§ظ„ط§ظپطھط±ط§ط¶ظٹ
     if target_user.username == 'manager' and request.method in ['PUT', 'PATCH', 'DELETE']:
-        return JsonResponse({"status": "error", "message": "لا يمكن تعديل أو حذف بيانات الأدمن الافتراضي manager"}, status=403)
+        return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹظ…ظƒظ† طھط¹ط¯ظٹظ„ ط£ظˆ ط­ط°ظپ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط§ظپطھط±ط§ط¶ظٹ manager"}, status=403)
 
     if request.method == 'GET':
         data = {
@@ -761,7 +820,7 @@ def user_detail_view(request, pk):
 
         if requester_role == 'TEACHER':
             if target_profile.role != 'STUDENT':
-                return JsonResponse({"status": "error", "message": "لا يحق للمعلم تعديل غير حسابات الطلاب"}, status=403)
+                return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ„ظ…ط¹ظ„ظ… طھط¹ط¯ظٹظ„ ط؛ظٹط± ط­ط³ط§ط¨ط§طھ ط§ظ„ط·ظ„ط§ط¨"}, status=403)
 
             requester_user = User.objects.using(db_name).get(username=requester_username)
             account_req = AccountRequest.objects.using(db_name).create(
@@ -774,31 +833,31 @@ def user_detail_view(request, pk):
             )
             return JsonResponse({
                 "status": "pending_approval",
-                "message": "تم تقديم طلب تعديل حساب الطالب بنجاح، بانتظار موافقة مدير المركز أو الأدمن",
+                "message": "طھظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ طھط¹ط¯ظٹظ„ ط­ط³ط§ط¨ ط§ظ„ط·ط§ظ„ط¨ ط¨ظ†ط¬ط§ط­طŒ ط¨ط§ظ†طھط¸ط§ط± ظ…ظˆط§ظپظ‚ط© ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط£ظˆ ط§ظ„ط£ط¯ظ…ظ†",
                 "request_id": str(account_req.id)
             }, status=202)
 
         if requester_role == 'CENTER_MANAGER':
             if target_profile.role in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-                return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز تعديل حسابات الأدمن الرئيسي أو مدراء المراكز"}, status=403)
+                return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² طھط¹ط¯ظٹظ„ ط­ط³ط§ط¨ط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ ط£ظˆ ظ…ط¯ط±ط§ط، ط§ظ„ظ…ط±ط§ظƒط²"}, status=403)
             if requester_profile and requester_profile.center:
                 data['center_id'] = str(requester_profile.center.id)
 
         if requester_role not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-            return JsonResponse({"status": "error", "message": "صلاحيات غير كافية لتعديل هذا الحساب"}, status=403)
+            return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط؛ظٹط± ظƒط§ظپظٹط© ظ„طھط¹ط¯ظٹظ„ ظ‡ط°ط§ ط§ظ„ط­ط³ط§ط¨"}, status=403)
 
         try:
             execute_user_update(db_name, target_user, data)
-            return JsonResponse({"status": "success", "message": "تم تعديل بيانات الحساب بنجاح"})
+            return JsonResponse({"status": "success", "message": "طھظ… طھط¹ط¯ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط­ط³ط§ط¨ ط¨ظ†ط¬ط§ط­"})
         except ValueError as e:
             return JsonResponse({"status": "error", "message": str(e)}, status=400)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل بيانات الحساب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "ظپط´ظ„ طھط¹ط¯ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط­ط³ط§ط¨", "details": str(e)}, status=500)
 
     elif request.method == 'DELETE':
         if requester_role == 'TEACHER':
             if target_profile.role != 'STUDENT':
-                return JsonResponse({"status": "error", "message": "لا يحق للمعلم حذف غير حسابات الطلاب"}, status=403)
+                return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ„ظ…ط¹ظ„ظ… ط­ط°ظپ ط؛ظٹط± ط­ط³ط§ط¨ط§طھ ط§ظ„ط·ظ„ط§ط¨"}, status=403)
 
             requester_user = User.objects.using(db_name).get(username=requester_username)
             account_req = AccountRequest.objects.using(db_name).create(
@@ -810,29 +869,29 @@ def user_detail_view(request, pk):
             )
             return JsonResponse({
                 "status": "pending_approval",
-                "message": "تم تقديم طلب حذف حساب الطالب بنجاح، بانتظار موافقة مدير المركز أو الأدمن",
+                "message": "طھظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ط­ط°ظپ ط­ط³ط§ط¨ ط§ظ„ط·ط§ظ„ط¨ ط¨ظ†ط¬ط§ط­طŒ ط¨ط§ظ†طھط¸ط§ط± ظ…ظˆط§ظپظ‚ط© ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط£ظˆ ط§ظ„ط£ط¯ظ…ظ†",
                 "request_id": str(account_req.id)
             }, status=202)
 
         if requester_role == 'CENTER_MANAGER':
             if target_profile.role in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-                return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز حذف حسابات الأدمن الرئيسي أو مدراء المراكز"}, status=403)
+                return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط­ط°ظپ ط­ط³ط§ط¨ط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ ط£ظˆ ظ…ط¯ط±ط§ط، ط§ظ„ظ…ط±ط§ظƒط²"}, status=403)
 
         if requester_role not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-            return JsonResponse({"status": "error", "message": "صلاحيات الأدمن الرئيسي أو مدير المركز مطلوبة لحذف هذا الحساب"}, status=403)
+            return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ ط£ظˆ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ…ط·ظ„ظˆط¨ط© ظ„ط­ط°ظپ ظ‡ط°ط§ ط§ظ„ط­ط³ط§ط¨"}, status=403)
 
         if target_user.username == requester_username:
-            return JsonResponse({"status": "error", "message": "لا يمكنك حذف حسابك الشخصي الحالي أثناء تسجيل الدخول"}, status=400)
+            return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹظ…ظƒظ†ظƒ ط­ط°ظپ ط­ط³ط§ط¨ظƒ ط§ظ„ط´ط®طµظٹ ط§ظ„ط­ط§ظ„ظٹ ط£ط«ظ†ط§ط، طھط³ط¬ظٹظ„ ط§ظ„ط¯ط®ظˆظ„"}, status=400)
 
         try:
             execute_user_delete(db_name, target_user)
-            user_label = "حساب المعلم" if target_profile.role == 'TEACHER' or 'TEACHER' in target_profile.get_roles() else "الحساب"
+            user_label = "ط­ط³ط§ط¨ ط§ظ„ظ…ط¹ظ„ظ…" if target_profile.role == 'TEACHER' or 'TEACHER' in target_profile.get_roles() else "ط§ظ„ط­ط³ط§ط¨"
             target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
-            return JsonResponse({"status": "success", "message": f"تم حذف {user_label} ({target_name}) بنجاح"})
+            return JsonResponse({"status": "success", "message": f"طھظ… ط­ط°ظپ {user_label} ({target_name}) ط¨ظ†ط¬ط§ط­"})
         except ValueError as e:
             return JsonResponse({"status": "error", "message": str(e)}, status=400)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف الحساب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "ظپط´ظ„ ط­ط°ظپ ط§ظ„ط­ط³ط§ط¨", "details": str(e)}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -840,7 +899,7 @@ def user_detail_view(request, pk):
 @csrf_exempt
 def user_impersonate_view(request, pk):
     """
-    تسجيل الدخول كأي مستخدم بدون كلمة سر (خاصية الأدمن ومدير المركز للمستهدفين من مركزه)
+    طھط³ط¬ظٹظ„ ط§ظ„ط¯ط®ظˆظ„ ظƒط£ظٹ ظ…ط³طھط®ط¯ظ… ط¨ط¯ظˆظ† ظƒظ„ظ…ط© ط³ط± (ط®ط§طµظٹط© ط§ظ„ط£ط¯ظ…ظ† ظˆظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ„ظ„ظ…ط³طھظ‡ط¯ظپظٹظ† ظ…ظ† ظ…ط±ظƒط²ظ‡)
     """
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -852,18 +911,18 @@ def user_impersonate_view(request, pk):
 
     token_payload = get_token_payload(request)
     if not token_payload:
-        return JsonResponse({"status": "error", "message": "التوكن مفقودة أو غير صالحة"}, status=401)
+        return JsonResponse({"status": "error", "message": "ط§ظ„طھظˆظƒظ† ظ…ظپظ‚ظˆط¯ط© ط£ظˆ ط؛ظٹط± طµط§ظ„ط­ط©"}, status=401)
 
     requester_role = token_payload.get('role')
     requester_username = token_payload.get('username')
-    if requester_role not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-        return JsonResponse({"status": "error", "message": "صلاحيات الأدمن الرئيسي أو مدير المركز مطلوبة لاستخدام الدخول بديل الحساب"}, status=403)
+    if requester_role != 'TENANT_ADMIN':
+        return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ ظ…ط·ظ„ظˆط¨ط© ظ„ط§ط³طھط®ط¯ط§ظ… ط§ظ„ط¯ط®ظˆظ„ ط¨ط¯ظٹظ„ ط§ظ„ط­ط³ط§ط¨"}, status=403)
 
     try:
         target_user = User.objects.using(db_name).get(id=pk)
         target_profile = UserProfile.objects.using(db_name).get(user=target_user)
     except User.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "المستخدم المستهدف غير موجود"}, status=404)
+        return JsonResponse({"status": "error", "message": "ط§ظ„ظ…ط³طھط®ط¯ظ… ط§ظ„ظ…ط³طھظ‡ط¯ظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"}, status=404)
     except UserProfile.DoesNotExist:
         target_profile = UserProfile.objects.using(db_name).create(user=target_user, role='STUDENT')
 
@@ -875,11 +934,12 @@ def user_impersonate_view(request, pk):
             requester_profile = None
 
         if not requester_profile or not requester_profile.center or target_profile.center != requester_profile.center:
-            return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز الدخول بحسابات خارج مركزه"}, status=403)
+            return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط§ظ„ط¯ط®ظˆظ„ ط¨ط­ط³ط§ط¨ط§طھ ط®ط§ط±ط¬ ظ…ط±ظƒط²ظ‡"}, status=403)
 
         if target_profile.role in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-            return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز الدخول بحساب أدمن أو مدير مركز آخر"}, status=403)
+            return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط§ظ„ط¯ط®ظˆظ„ ط¨ط­ط³ط§ط¨ ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ظ…ط±ظƒط² ط¢ط®ط±"}, status=403)
 
+    user_roles = target_profile.get_roles()
     jwt_secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
     access_lifetime = getattr(settings, 'JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60)
     now = datetime.utcnow()
@@ -889,6 +949,7 @@ def user_impersonate_view(request, pk):
         "username": target_user.username,
         "user_id": str(target_user.id),
         "role": target_profile.role,
+        "roles": user_roles,
         "impersonated_by": token_payload.get('username'),
         "exp": now + timezone.timedelta(minutes=int(access_lifetime)),
         "iat": now
@@ -898,14 +959,17 @@ def user_impersonate_view(request, pk):
 
     return JsonResponse({
         "status": "success",
-        "message": f"تم تسجيل الدخول بنجاح بحساب المستخدم {target_user.username}",
+        "message": f"طھظ… طھط³ط¬ظٹظ„ ط§ظ„ط¯ط®ظˆظ„ ط¨ظ†ط¬ط§ط­ ط¨ط­ط³ط§ط¨ ط§ظ„ظ…ط³طھط®ط¯ظ… {target_user.username}",
         "data": {
             "access_token": token,
             "token_type": "Bearer",
             "user": {
                 "id": str(target_user.id),
                 "username": target_user.username,
-                "role": target_profile.role
+                "first_name": target_user.first_name,
+                "last_name": target_user.last_name,
+                "role": target_profile.role,
+                "roles": user_roles
             }
         }
     }, status=200)
@@ -920,7 +984,7 @@ def account_request_list_view(request):
 
     token_payload = get_token_payload(request)
     if not token_payload or token_payload.get('role') not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-        return JsonResponse({"status": "error", "message": "صلاحيات الأدمن أو مدير المركز مطلوبة لمشاهدة الطلبات"}, status=403)
+        return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ…ط·ظ„ظˆط¨ط© ظ„ظ…ط´ط§ظ‡ط¯ط© ط§ظ„ط·ظ„ط¨ط§طھ"}, status=403)
 
     requester_role = token_payload.get('role')
     requester_username = token_payload.get('username')
@@ -955,7 +1019,7 @@ def account_request_list_view(request):
                 })
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء استرجاع قائمة الطلبات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "ط­ط¯ط« ط®ط·ط£ ط£ط«ظ†ط§ط، ط§ط³طھط±ط¬ط§ط¹ ظ‚ط§ط¦ظ…ط© ط§ظ„ط·ظ„ط¨ط§طھ", "details": str(e)}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -972,7 +1036,7 @@ def account_request_approve_view(request, pk):
 
     token_payload = get_token_payload(request)
     if not token_payload or token_payload.get('role') not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-        return JsonResponse({"status": "error", "message": "صلاحيات الأدمن أو مدير المركز مطلوبة للموافقة على الطلبات"}, status=403)
+        return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ…ط·ظ„ظˆط¨ط© ظ„ظ„ظ…ظˆط§ظپظ‚ط© ط¹ظ„ظ‰ ط§ظ„ط·ظ„ط¨ط§طھ"}, status=403)
 
     requester_role = token_payload.get('role')
     requester_username = token_payload.get('username')
@@ -980,16 +1044,16 @@ def account_request_approve_view(request, pk):
     try:
         acc_req = AccountRequest.objects.using(db_name).get(id=pk, status='PENDING')
     except AccountRequest.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "الطلب المعلق غير موجود أو تم اتخاذ إجراء عليه سابقاً"}, status=404)
+        return JsonResponse({"status": "error", "message": "ط§ظ„ط·ظ„ط¨ ط§ظ„ظ…ط¹ظ„ظ‚ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ ط£ظˆ طھظ… ط§طھط®ط§ط° ط¥ط¬ط±ط§ط، ط¹ظ„ظٹظ‡ ط³ط§ط¨ظ‚ط§ظ‹"}, status=404)
 
     if requester_role == 'CENTER_MANAGER':
         try:
             requester_user = User.objects.using(db_name).get(username=requester_username)
             requester_profile = UserProfile.objects.using(db_name).get(user=requester_user)
             if not requester_profile or not requester_profile.center or acc_req.center != requester_profile.center:
-                return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز الموافقة على طلبات خارج مركزه"}, status=403)
+                return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط§ظ„ظ…ظˆط§ظپظ‚ط© ط¹ظ„ظ‰ ط·ظ„ط¨ط§طھ ط®ط§ط±ط¬ ظ…ط±ظƒط²ظ‡"}, status=403)
         except Exception:
-            return JsonResponse({"status": "error", "message": "خطأ في التحقق من ملف مدير المركز"}, status=403)
+            return JsonResponse({"status": "error", "message": "ط®ط·ط£ ظپظٹ ط§ظ„طھط­ظ‚ظ‚ ظ…ظ† ظ…ظ„ظپ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط²"}, status=403)
 
     reviewer_user = User.objects.using(db_name).get(username=requester_username)
 
@@ -1005,12 +1069,12 @@ def account_request_approve_view(request, pk):
         acc_req.reviewed_by = reviewer_user
         acc_req.save(using=db_name)
 
-        return JsonResponse({"status": "success", "message": "تمت الموافقة على الطلب وتنفيذه بنجاح على قاعدة البيانات"})
+        return JsonResponse({"status": "success", "message": "طھظ…طھ ط§ظ„ظ…ظˆط§ظپظ‚ط© ط¹ظ„ظ‰ ط§ظ„ط·ظ„ط¨ ظˆطھظ†ظپظٹط°ظ‡ ط¨ظ†ط¬ط§ط­ ط¹ظ„ظ‰ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ"})
 
     except ValueError as e:
         return JsonResponse({"status": "error", "message": str(e)}, status=400)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشل تنفيذ الطلب", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "ظپط´ظ„ طھظ†ظپظٹط° ط§ظ„ط·ظ„ط¨", "details": str(e)}, status=500)
 
 
 @csrf_exempt
@@ -1025,7 +1089,7 @@ def account_request_reject_view(request, pk):
 
     token_payload = get_token_payload(request)
     if not token_payload or token_payload.get('role') not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-        return JsonResponse({"status": "error", "message": "صلاحيات الأدمن أو مدير المركز مطلوبة لرفض الطلبات"}, status=403)
+        return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ…ط·ظ„ظˆط¨ط© ظ„ط±ظپط¶ ط§ظ„ط·ظ„ط¨ط§طھ"}, status=403)
 
     requester_role = token_payload.get('role')
     requester_username = token_payload.get('username')
@@ -1033,24 +1097,189 @@ def account_request_reject_view(request, pk):
     try:
         acc_req = AccountRequest.objects.using(db_name).get(id=pk, status='PENDING')
     except AccountRequest.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "الطلب غير موجود أو تم اتخاذ إجراء عليه سابقاً"}, status=404)
+        return JsonResponse({"status": "error", "message": "ط§ظ„ط·ظ„ط¨ ط؛ظٹط± ظ…ظˆط¬ظˆط¯ ط£ظˆ طھظ… ط§طھط®ط§ط° ط¥ط¬ط±ط§ط، ط¹ظ„ظٹظ‡ ط³ط§ط¨ظ‚ط§ظ‹"}, status=404)
 
     if requester_role == 'CENTER_MANAGER':
         try:
             requester_user = User.objects.using(db_name).get(username=requester_username)
             requester_profile = UserProfile.objects.using(db_name).get(user=requester_user)
             if not requester_profile or not requester_profile.center or acc_req.center != requester_profile.center:
-                return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز رفض طلبات خارج مركزه"}, status=403)
+                return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط±ظپط¶ ط·ظ„ط¨ط§طھ ط®ط§ط±ط¬ ظ…ط±ظƒط²ظ‡"}, status=403)
         except Exception:
-            return JsonResponse({"status": "error", "message": "خطأ في التحقق من ملف مدير المركز"}, status=403)
+            return JsonResponse({"status": "error", "message": "ط®ط·ط£ ظپظٹ ط§ظ„طھط­ظ‚ظ‚ ظ…ظ† ظ…ظ„ظپ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط²"}, status=403)
 
     data = parse_body(request)
     reviewer_user = User.objects.using(db_name).get(username=requester_username)
 
     acc_req.status = 'REJECTED'
     acc_req.reviewed_by = reviewer_user
-    acc_req.rejection_reason = data.get('reason', 'تم رفض الطلب بواسطة المسؤول')
+    acc_req.rejection_reason = data.get('reason', 'طھظ… ط±ظپط¶ ط§ظ„ط·ظ„ط¨ ط¨ظˆط§ط³ط·ط© ط§ظ„ظ…ط³ط¤ظˆظ„')
     acc_req.save(using=db_name)
 
-    return JsonResponse({"status": "success", "message": "تم رفض الطلب بنجاح"})
+    return JsonResponse({"status": "success", "message": "طھظ… ط±ظپط¶ ط§ظ„ط·ظ„ط¨ ط¨ظ†ط¬ط§ط­"})
 
+
+@csrf_exempt
+def user_me_view(request):
+    if request.method != 'GET':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    try:
+        db_name, tenant = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    token_payload = get_token_payload(request)
+    if not token_payload:
+        return JsonResponse({"status": "error", "message": "ط§ظ„طھظˆظƒظ† ظ…ظپظ‚ظˆط¯ط© ط£ظˆ ط؛ظٹط± طµط§ظ„ط­ط©"}, status=401)
+
+    username = token_payload.get('username')
+    try:
+        user = User.objects.using(db_name).get(username=username)
+        profile = UserProfile.objects.using(db_name).get(user=user)
+    except User.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯"}, status=404)
+    except UserProfile.DoesNotExist:
+        profile = UserProfile.objects.using(db_name).create(user=user, role='STUDENT', roles=['STUDENT'])
+
+    center_id = str(profile.center.id) if profile.center else None
+    center_name = profile.center.name if profile.center else None
+
+    data = {
+        "id": str(user.id),
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "role": profile.role,
+        "roles": profile.get_roles(),
+        "center_id": center_id,
+        "center_name": center_name,
+        "is_active": user.is_active,
+    }
+    data.update(serialize_profile(profile))
+    return JsonResponse({"status": "success", "data": data}, status=200)
+
+
+@csrf_exempt
+def switch_active_role_view(request):
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    try:
+        db_name, tenant = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    token_payload = get_token_payload(request)
+    if not token_payload:
+        return JsonResponse({"status": "error", "message": "ط§ظ„طھظˆظƒظ† ظ…ظپظ‚ظˆط¯ط© ط£ظˆ ط؛ظٹط± طµط§ظ„ط­ط©"}, status=401)
+
+    data = parse_body(request)
+    requested_role = str(data.get('role', '')).upper().strip()
+
+    if not requested_role:
+        return JsonResponse({"status": "error", "message": "ظٹط±ط¬ظ‰ طھط­ط¯ظٹط¯ ط§ظ„ط¯ظˆط± ط§ظ„ظ…ط±ط§ط¯ ط§ظ„طھط¨ط¯ظٹظ„ ط¥ظ„ظٹظ‡"}, status=400)
+
+    username = token_payload.get('username')
+    try:
+        user = User.objects.using(db_name).get(username=username)
+        profile = UserProfile.objects.using(db_name).get(user=user)
+    except (User.DoesNotExist, UserProfile.DoesNotExist):
+        return JsonResponse({"status": "error", "message": "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯"}, status=404)
+
+    user_roles = profile.get_roles()
+
+    if requested_role not in user_roles:
+        return JsonResponse({
+            "status": "error",
+            "message": "ط¹ط°ط±ط§ظ‹طŒ ظ‡ط°ط§ ط§ظ„ط¯ظˆط± ط؛ظٹط± ظ…ط³ظ†ط¯ ظ„ط­ط³ط§ط¨ظƒ"
+        }, status=403)
+
+    # طھط­ط¯ظٹط« ط§ظ„ط¯ظˆط± ط§ظ„ظ†ط´ط· ظپظٹ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ
+    profile.role = requested_role
+    profile.save(using=db_name)
+
+    profile_center_id = str(profile.center.id) if profile.center else None
+    profile_center_name = profile.center.name if profile.center else None
+
+    # طھظˆظ„ظٹط¯ طھظˆظƒظ† ط¬ط¯ظٹط¯ ط¨ط§ظ„ط¯ظˆط± ط§ظ„ظ†ط´ط· ط§ظ„ط¬ط¯ظٹط¯
+    jwt_secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
+    access_lifetime = getattr(settings, 'JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60)
+    now = datetime.utcnow()
+
+    new_payload = {
+        "tenant_id": str(tenant.id),
+        "subdomain": tenant.subdomain,
+        "username": user.username,
+        "user_id": str(user.id),
+        "role": requested_role,
+        "roles": user_roles,
+        "center_id": profile_center_id,
+        "center_name": profile_center_name,
+        "exp": now + timezone.timedelta(minutes=int(access_lifetime)),
+        "iat": now
+    }
+    new_token = jwt.encode(new_payload, jwt_secret, algorithm="HS256")
+
+    return JsonResponse({
+        "status": "success",
+        "message": f"طھظ… ط§ظ„طھط¨ط¯ظٹظ„ ط¥ظ„ظ‰ ط¯ظˆط± {requested_role} ط¨ظ†ط¬ط§ط­",
+        "data": {
+            "access_token": new_token,
+            "token_type": "Bearer",
+            "user": {
+                "id": str(user.id),
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": profile.role,
+                "roles": user_roles,
+                "center_id": profile_center_id,
+                "center_name": profile_center_name
+            }
+        }
+    }, status=200)
+
+
+@csrf_exempt
+def change_password_view(request):
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    try:
+        db_name, tenant = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    token_payload = get_token_payload(request)
+    if not token_payload:
+        return JsonResponse({"status": "error", "message": "التوكن مفقودة أو غير صالحة"}, status=401)
+
+    username = token_payload.get('username')
+    try:
+        user = User.objects.using(db_name).get(username=username)
+    except User.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "المستخدم غير موجود"}, status=404)
+
+    data = parse_body(request)
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+    confirm_password = data.get('confirm_password')
+
+    if not current_password or not new_password or not confirm_password:
+        return JsonResponse({"status": "error", "message": "يرجى تعبئة جميع الحقول المطلوبة"}, status=400)
+
+    if new_password != confirm_password:
+        return JsonResponse({"status": "error", "message": "كلمة المرور الجديدة غير متطابقة مع التأكيد"}, status=400)
+
+    if len(new_password) < 6:
+        return JsonResponse({"status": "error", "message": "يجب أن تكون كلمة المرور الجديدة 6 أحرف على الأقل"}, status=400)
+
+    if not check_password(current_password, user.password):
+        return JsonResponse({"status": "error", "message": "كلمة المرور الحالية غير صحيحة"}, status=400)
+
+    user.password = make_password(new_password)
+    user.save(using=db_name)
+
+    return JsonResponse({"status": "success", "message": "تم تغيير كلمة المرور بنجاح"})

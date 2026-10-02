@@ -69,7 +69,11 @@ class UserProfile(models.Model):
 
     def save(self, *args, **kwargs):
         if self.roles and isinstance(self.roles, list) and len(self.roles) > 0:
-            self.role = self.roles[0]
+            seen = set()
+            clean_roles = [r for r in self.roles if not (r in seen or seen.add(r))]
+            self.roles = clean_roles
+            if self.role not in clean_roles:
+                self.role = clean_roles[0]
         elif self.role:
             self.roles = [self.role]
         else:

@@ -125,10 +125,14 @@ def get_centers_summary_data(centers_qs, db_name):
     حساب وإرجاع كافة البيانات الإحصائية والأنشطة ومعلومات الإدارة للمراكز بشكل مجمع (Bulk Aggregation)
     لتجنب استعلامات N+1 وضمان أفضل أداء.
     """
-    from django.db.models import Count
+    from django.db.models import Count, Q
     from tenant_modules.users.models import UserProfile, AccountRequest
     from tenant_modules.halaqat.models import Halaqa
-    from tenant_modules.students_and_parents.models import Student
+    from tenant_modules.students_and_parents.models import (
+        Student,
+        StudentRegistrationRequest,
+        StudentDeletionRequest
+    )
     from tenant_modules.attendance.models import AttendanceLog
     from tenant_modules.recitation_and_sabr.models import RecitationLog
     from .models import MosqueWeeklySchedule
@@ -228,19 +232,37 @@ def get_centers_summary_data(centers_qs, db_name):
     ).values('center_id').annotate(count=Count('id'))
     mosque_count_map = {item['center_id']: item['count'] for item in mosque_counts}
 
-    # 7. Account Requests per center
-    req_counts = AccountRequest.objects.using(db_name).filter(
-        center_id__in=center_ids
-    ).values('center_id', 'status').annotate(count=Count('id'))
+    # 7. Student Registration & Deletion Requests per center
     requests_stats = {cid: {'open': 0, 'completed': 0} for cid in center_ids}
-    for item in req_counts:
-        cid = item['center_id']
-        st = item['status']
-        cnt = item['count']
-        if cid in requests_stats:
+
+    if halaqa_center_map:
+        reg_counts = StudentRegistrationRequest.objects.using(db_name).filter(
+            halaqa_id__in=halaqa_center_map.keys()
+        ).values('halaqa_id', 'status').annotate(count=Count('id'))
+
+        for item in reg_counts:
+            cid = halaqa_center_map.get(item['halaqa_id'])
+            if not cid:
+                continue
+            st = item['status']
+            cnt = item['count']
             if st == 'PENDING':
                 requests_stats[cid]['open'] += cnt
-            elif st in ['APPROVED', 'REJECTED']:
+            elif st in ['APPROVED', 'REJECTED', 'CANCELLED']:
+                requests_stats[cid]['completed'] += cnt
+
+    del_reqs = StudentDeletionRequest.objects.using(db_name).filter(
+        Q(student__halaqa__center_id__in=center_ids) | Q(student__enrollments__halaqa__center_id__in=center_ids)
+    ).values('student__halaqa__center_id', 'status').annotate(count=Count('id'))
+
+    for item in del_reqs:
+        cid = item['student__halaqa__center_id']
+        if cid in requests_stats:
+            st = item['status']
+            cnt = item['count']
+            if st == 'PENDING':
+                requests_stats[cid]['open'] += cnt
+            elif st in ['APPROVED', 'REJECTED', 'CANCELLED']:
                 requests_stats[cid]['completed'] += cnt
 
     result = []
@@ -324,8 +346,6 @@ def get_centers_summary_data(centers_qs, db_name):
         })
 
     return result
-
-
 @csrf_exempt
 def center_list_create_view(request):
     try:
@@ -388,6 +408,7 @@ def center_list_create_view(request):
 
 @csrf_exempt
 def center_detail_view(request, pk):
+    from tenant_modules.students_and_parents.models import StudentRegistrationRequest, StudentDeletionRequest
     try:
         db_name = get_tenant_db(request)
     except Exception as e:
@@ -434,17 +455,41 @@ def center_detail_view(request, pk):
             for h in halaqat
         ]
 
-        recent_requests = AccountRequest.objects.using(db_name).filter(center=center).order_by('-created_at')[:10]
-        requests_list = [
-            {
+        reg_reqs = StudentRegistrationRequest.objects.using(db_name).filter(
+            halaqa__center=center
+        ).select_related('requested_by__user').order_by('-created_at')[:10]
+
+        # جلب أحدث طلبات الحذف للمركز
+        del_reqs = StudentDeletionRequest.objects.using(db_name).filter(
+            student__halaqa__center=center
+        ).select_related('requested_by__user', 'student').order_by('-created_at')[:10]
+
+        requests_list = []
+        for r in reg_reqs:
+            req_user = r.requested_by.user if r.requested_by else None
+            user_name = f"{req_user.first_name} {req_user.last_name}".strip() or req_user.username if req_user else "معلم"
+            requests_list.append({
                 "id": str(r.id),
-                "requested_by": r.requested_by.username if r.requested_by else "غير معروف",
-                "action_type": r.action_type,
+                "requested_by": f"{user_name} (طالب: {r.full_name})",
+                "action_type": "تسجيل طالب جديد" if r.request_type == 'NEW' else "تعديل بيانات طالب",
                 "status": r.status,
                 "created_at": r.created_at.isoformat() if r.created_at else None
-            }
-            for r in recent_requests
-        ]
+            })
+
+        for r in del_reqs:
+            req_user = r.requested_by.user if r.requested_by else None
+            user_name = f"{req_user.first_name} {req_user.last_name}".strip() or req_user.username if req_user else "معلم"
+            requests_list.append({
+                "id": str(r.id),
+                "requested_by": f"{user_name} (طالب: {r.student.full_name if r.student else ''})",
+                "action_type": "حذف طالب",
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            })
+
+        # ترتيب القائمة المدمجة تنازلياً حسب تاريخ الإنشاء
+        requests_list.sort(key=lambda x: x['created_at'] or '', reverse=True)
+        requests_list = requests_list[:10]
 
         center_data["halaqat"] = halaqat_list
         center_data["recent_requests"] = requests_list
@@ -597,6 +642,8 @@ def serialize_project(project):
         "evaluation_template_id": str(eval_tmpl.id) if eval_tmpl else None,
         "evaluation_template_title": eval_tmpl.title if eval_tmpl else None,
         "evaluation_template": eval_tmpl_data,
+        "test_rubric_id": str(project.test_rubric.id) if project.test_rubric else None,
+        "test_rubric_title": project.test_rubric.title if project.test_rubric else None,
         "is_active": project.is_active,
         "centers": [{"id": str(c.id), "name": c.name} for c in project.centers.all()],
         "stages": [serialize_stage(s) for s in stages],
@@ -786,13 +833,22 @@ def project_list_create_view(request):
                         "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
                     }, status=400)
 
+            test_rubric_id = data.get('test_rubric_id')
+            test_rubric = None
+            if test_rubric_id:
+                try:
+                    test_rubric = TestRubric.objects.using(db_name).get(id=test_rubric_id, is_active=True)
+                except TestRubric.DoesNotExist:
+                    return JsonResponse({"status": "error", "message": "سلم الاختبار المحدد غير موجود أو غير نشط"}, status=404)
+
             project = Project.objects.using(db_name).create(
                 title=clean_title,
                 description=data.get('description'),
                 project_type=project_type,
                 is_global=is_global,
                 require_exam_for_all_stages=require_exam_for_all_stages,
-                evaluation_template=eval_template
+                evaluation_template=eval_template,
+                test_rubric=test_rubric
             )
             
             if not is_global and center_ids:
@@ -874,6 +930,16 @@ def project_detail_view(request, pk):
                 except EvaluationTemplate.DoesNotExist:
                     return JsonResponse({"status": "error", "message": "نموذج التقييم المحدد غير موجود أو غير نشط"}, status=404)
 
+
+            if 'test_rubric_id' in data:
+                tr_id = data['test_rubric_id']
+                if tr_id:
+                    try:
+                        project.test_rubric = TestRubric.objects.using(db_name).get(id=tr_id, is_active=True)
+                    except TestRubric.DoesNotExist:
+                        return JsonResponse({"status": "error", "message": "سلم الاختبار المحدد غير موجود أو غير نشط"}, status=404)
+                else:
+                    project.test_rubric = None
 
             project.save(using=db_name)
             

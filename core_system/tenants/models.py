@@ -19,6 +19,7 @@ class Tenant(models.Model):
     admin_password_hash = models.CharField(max_length=255, default='')
 
     is_active = models.BooleanField(default=True)
+    is_rewards_store_enabled = models.BooleanField(default=True, help_text="فتح أو إغلاق متجر المكافآت على مستوى المسجد")
     contact_phone = models.CharField(max_length=20)
     contact_email = models.EmailField(max_length=100, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

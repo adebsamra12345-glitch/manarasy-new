@@ -19,7 +19,7 @@ const UsersManagement = () => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
 
-    const currentUserName = localStorage.getItem('username') || 'محمد العمري';
+    const currentUserName = localStorage.getItem('username');
     const todayDate = new Date();
     const hijriDate = new Intl.DateTimeFormat('ar-SA', {
         calendar: 'islamic', day: 'numeric', month: 'long', year: 'numeric'
@@ -90,6 +90,23 @@ const UsersManagement = () => {
         }
     };
 
+    const getRoleBadgeStyle = (role) => {
+        switch (role) {
+            case 'TENANT_ADMIN':
+                return { background: '#f3e8ff', color: '#6b21a8', border: '1px solid #e9d5ff' };
+            case 'CENTER_MANAGER':
+                return { background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' };
+            case 'TEACHER':
+                return { background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' };
+            case 'STUDENT':
+                return { background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' };
+            case 'PARENT':
+                return { background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe' };
+            default:
+                return { background: '#edf2f7', color: '#4a5568', border: '1px solid #cbd5e0' };
+        }
+    };
+
     const getStatusBadge = (isActive) => {
         if (isActive) {
             return <span style={{ background: '#7cb342', color: '#fff', padding: '0.3rem 1.2rem', borderRadius: '4px', fontSize: '0.85rem' }}>نشط</span>;
@@ -98,9 +115,9 @@ const UsersManagement = () => {
     };
 
     const filteredUsers = users.filter(user => {
-        const matchesSearch = (user.first_name + ' ' + user.last_name).toLowerCase().includes(searchQuery.toLowerCase()) || 
-                              user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                              (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()));
+        const matchesSearch = (user.first_name + ' ' + user.last_name).toLowerCase().includes(searchQuery.toLowerCase()) ||
+            user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (user.email && user.email.toLowerCase().includes(searchQuery.toLowerCase()));
         const userRoles = Array.isArray(user.roles) ? user.roles : [user.role];
         const matchesRole = selectedRole === 'all' || userRoles.includes(selectedRole);
         const matchesCenter = selectedCenter === 'all' || user.center_id === selectedCenter;
@@ -151,7 +168,7 @@ const UsersManagement = () => {
                                 outline: 'none', cursor: 'pointer', width: '100%', paddingRight: '0.5rem'
                             }}
                         >
-                            <option value="all">المركز الرئيسي</option>
+                            <option value="all"> جميع المراكز</option>
                             {centers.map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
@@ -180,24 +197,24 @@ const UsersManagement = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                     <h2 style={{ fontSize: '2.2rem', color: '#133315', margin: 0, fontWeight: 'bold' }}>المستخدمون</h2>
-                    
+
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '0.5rem 1rem', width: '300px', marginRight: '2rem' }}>
                         <MagnifyingGlass size={18} color="#a0aec0" style={{ position: 'absolute', left: '1rem' }} />
-                        <input 
-                            type="text" 
-                            placeholder="ابحث عن مستخدم ..." 
+                        <input
+                            type="text"
+                            placeholder="ابحث عن مستخدم ..."
                             value={searchQuery}
                             onChange={handleSearch}
-                            style={{ border: 'none', outline: 'none', background: 'transparent', width: '100%', fontSize: '0.95rem' }} 
+                            style={{ border: 'none', outline: 'none', background: 'transparent', width: '100%', fontSize: '0.95rem' }}
                         />
                     </div>
-                    
+
                     <button style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.5rem 0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#718096' }}>
                         <Funnel size={20} />
                     </button>
                 </div>
 
-                <button 
+                <button
                     onClick={() => setIsCreateModalOpen(true)}
                     style={{ background: '#558b2f', color: '#fff', border: 'none', padding: '0.6rem 1.5rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
                 >
@@ -235,7 +252,7 @@ const UsersManagement = () => {
                                     year: 'numeric', month: 'numeric', day: 'numeric',
                                     hour: 'numeric', minute: 'numeric', hour12: true
                                 });
-                                
+
                                 return (
                                     <tr key={user.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                                         <td style={{ padding: '1rem', color: '#718096' }}>{index + 1}</td>
@@ -249,14 +266,26 @@ const UsersManagement = () => {
                                         </td>
                                         <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0', color: '#718096' }}>{user.email || '—'}</td>
                                         <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0' }}>
-                                            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                                                <select style={{
-                                                    appearance: 'none', background: '#fff', border: '1px solid #cbd5e0', borderRadius: '4px',
-                                                    padding: '0.3rem 2rem 0.3rem 0.5rem', color: '#4a5568', outline: 'none', cursor: 'pointer', fontSize: '0.85rem'
-                                                }}>
-                                                    <option>{getRoleName(user.role)}</option>
-                                                </select>
-                                                <CaretDown size={12} color="#718096" style={{ position: 'absolute', right: '0.5rem', pointerEvents: 'none' }} />
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                                                {Array.from(new Set(Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : [user.role])).map((r) => {
+                                                    const style = getRoleBadgeStyle(r);
+                                                    return (
+                                                        <span
+                                                            key={r}
+                                                            style={{
+                                                                ...style,
+                                                                padding: '0.25rem 0.65rem',
+                                                                borderRadius: '12px',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: '600',
+                                                                whiteSpace: 'nowrap',
+                                                                display: 'inline-block'
+                                                            }}
+                                                        >
+                                                            {getRoleName(r)}
+                                                        </span>
+                                                    );
+                                                })}
                                             </div>
                                         </td>
                                         <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0' }}>
@@ -276,18 +305,18 @@ const UsersManagement = () => {
                 </table>
             </div>
             {toastMessage && (
-                <div style={{ 
-                    position: 'fixed', 
-                    bottom: '24px', 
-                    left: '24px', 
-                    zIndex: 9999, 
-                    background: '#133315', 
-                    color: '#fff', 
-                    padding: '0.85rem 1.75rem', 
-                    borderRadius: '12px', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px', 
+                <div style={{
+                    position: 'fixed',
+                    bottom: '24px',
+                    left: '24px',
+                    zIndex: 9999,
+                    background: '#133315',
+                    color: '#fff',
+                    padding: '0.85rem 1.75rem',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
                     fontSize: '0.95rem',
                     boxShadow: '0 8px 24px rgba(0,0,0,0.18)'
                 }}>

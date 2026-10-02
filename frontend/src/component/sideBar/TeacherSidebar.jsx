@@ -1,17 +1,16 @@
-import { House, CalendarBlank, Books, Users, SignOut } from '@phosphor-icons/react';
+import { House, CalendarBlank, Books, Users, SignOut, User } from '@phosphor-icons/react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
+import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
 
 const TeacherSidebar = () => {
-    const { user, logout } = useAuthContext();
+    const { logout } = useAuthContext();
     const navigate = useNavigate();
 
     const handleLogout = () => {
         logout();
         navigate('/login', { replace: true });
     };
-
-    const displayName = user?.username || localStorage.getItem('username') || 'معلم';
 
     return (
         <aside id="teacher-sidebar" className="sidebar-container hide-on-mobile">
@@ -20,13 +19,7 @@ const TeacherSidebar = () => {
                 <span>مَنَارَة</span>
             </div>
 
-            <div className="user-profile">
-                <img src={`https://ui-avatars.com/api/?name=${displayName}&background=2d6a4f&color=fff&rounded=true`} alt={displayName} />
-                <div className="user-info">
-                    <h3>{displayName}</h3>
-                    <p>معلم حلقة</p>
-                </div>
-            </div>
+            <UserProfileRoleSwitcher />
 
             <nav className="nav-menu">
                 <NavLink to="/teacher/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -40,6 +33,10 @@ const TeacherSidebar = () => {
                 <NavLink to="/teacher/students" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <Users size={20} />
                     الطلاب
+                </NavLink>
+                <NavLink to="/teacher/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                    <User size={20} />
+                    الملف الشخصي
                 </NavLink>
                 {/* 
                 <NavLink to="/teacher/sessions" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>

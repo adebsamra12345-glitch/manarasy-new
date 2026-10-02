@@ -1,18 +1,44 @@
 import { useState } from 'react';
-import { House, Books, Users, CalendarBlank, DotsThree, User, Bell, SignOut, X } from '@phosphor-icons/react';
+import { House, Books, Users, CalendarBlank, User, Bell, SignOut, X, Check, CircleNotch } from '@phosphor-icons/react';
 import { NavLink, useNavigate } from 'react-router-dom';
 
 import { useAuthContext } from '../../context/AuthContext';
+import { getRoleDisplayName, getRoleDefaultRoute } from '../../utils/roleUtils';
 
 export const MobileTopbar = () => {
-    const { user, role, logout } = useAuthContext();
+    const { user, role, roles, logout, switchRole } = useAuthContext();
     const navigate = useNavigate();
     const [showMenu, setShowMenu] = useState(false);
-    const displayName = user?.first_name || user?.username || localStorage.getItem('username') || 'المستخدم';
+    const [isSwitching, setIsSwitching] = useState(false);
+
+    const displayName = user?.first_name 
+        ? `${user.first_name} ${user.last_name || ''}`.trim()
+        : user?.username || localStorage.getItem('username') || 'المستخدم';
+
+    const activeRole = role || 'STUDENT';
+    const userRoles = Array.isArray(roles) && roles.length > 0 ? roles : [activeRole];
+    const hasMultipleRoles = userRoles.length > 1;
 
     const handleLogout = () => {
         logout();
         navigate('/login');
+    };
+
+    const handleRoleSelect = async (targetRole) => {
+        if (targetRole.toUpperCase() === activeRole.toUpperCase() || isSwitching) {
+            return;
+        }
+        try {
+            setIsSwitching(true);
+            await switchRole(targetRole);
+            setShowMenu(false);
+            const targetRoute = getRoleDefaultRoute(targetRole);
+            navigate(targetRoute, { replace: true });
+        } catch (error) {
+            console.error("فشل تبديل الدور على الموبايل:", error);
+        } finally {
+            setIsSwitching(false);
+        }
     };
 
     return (
@@ -57,8 +83,8 @@ export const MobileTopbar = () => {
                                 <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=133315&color=fff&rounded=true`} alt="User" width="40" height="40" style={{ borderRadius: '50%' }} />
                                 <div>
                                     <div style={{ fontWeight: '700', fontSize: '1rem', color: '#133315' }}>{displayName}</div>
-                                    <div style={{ fontSize: '0.8rem', color: '#777' }}>
-                                        {role === 'teacher' ? 'معلم / محفظ' : role === 'tenant_admin' ? 'مدير المنشأة' : role === 'parent' ? 'ولي أمر' : role || 'مستخدم'}
+                                    <div style={{ fontSize: '0.82rem', color: '#666', fontWeight: 500 }}>
+                                        {getRoleDisplayName(activeRole)}
                                     </div>
                                 </div>
                             </div>
@@ -67,6 +93,77 @@ export const MobileTopbar = () => {
                             </button>
                         </div>
 
+                        {/* قسم تبديل الأدوار في حال تعدد الأدوار */}
+                        {hasMultipleRoles && (
+                            <div style={{ marginBottom: '1.2rem', borderBottom: '1px solid #f0f0f0', paddingBottom: '1rem' }}>
+                                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#133315', marginBottom: '0.6rem' }}>
+                                    تبديل الدور النشط:
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                    {userRoles.map((r) => {
+                                        const isActive = r.toUpperCase() === activeRole.toUpperCase();
+                                        return (
+                                            <button
+                                                key={r}
+                                                type="button"
+                                                onClick={() => handleRoleSelect(r)}
+                                                disabled={isSwitching}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justify: 'space-between',
+                                                    padding: '0.65rem 0.85rem',
+                                                    borderRadius: '10px',
+                                                    border: isActive ? '2px solid #133315' : '1px solid #e0e0e0',
+                                                    background: isActive ? '#f0f7f1' : '#f9f9f9',
+                                                    color: isActive ? '#133315' : '#444',
+                                                    fontWeight: isActive ? '700' : '500',
+                                                    fontSize: '0.88rem',
+                                                    cursor: 'pointer',
+                                                    fontFamily: 'inherit',
+                                                    transition: 'all 0.15s ease'
+                                                }}
+                                            >
+                                                <span>{getRoleDisplayName(r)}</span>
+                                                {isActive && (
+                                                    isSwitching ? <CircleNotch size={18} className="spin-icon" color="#133315" /> : <Check size={18} color="#133315" weight="bold" />
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        <button
+                            id="btn-mobile-profile"
+                            onClick={() => {
+                                setShowMenu(false);
+                                const basePath = getRoleDefaultRoute(activeRole).split('/')[1];
+                                navigate(`/${basePath}/profile`);
+                            }}
+                            style={{
+                                width: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0.6rem',
+                                padding: '0.75rem',
+                                background: '#f5f5f5',
+                                border: '1px solid #ddd',
+                                borderRadius: '10px',
+                                color: '#333',
+                                fontWeight: 700,
+                                fontSize: '0.95rem',
+                                cursor: 'pointer',
+                                fontFamily: 'inherit',
+                                marginBottom: '0.5rem',
+                                transition: 'background 0.2s'
+                            }}
+                        >
+                            <User size={20} />
+                            الملف الشخصي
+                        </button>
                         <button
                             id="btn-mobile-logout"
                             onClick={handleLogout}
@@ -93,10 +190,10 @@ export const MobileNavbar = () => {
     const normalizedRole = role ? role.toLowerCase() : '';
 
     let items = [
-        { to: '/dashboard', label: 'الرئيسية', icon: House },
-        { to: '/rings', label: 'الحلقات', icon: Books },
-        { to: '/students', label: 'الطلاب', icon: Users },
-        { to: '/sessions', label: 'الجلسات', icon: CalendarBlank },
+        { to: '/admin/dashboard', label: 'الرئيسية', icon: House },
+        { to: '/admin/rings', label: 'الحلقات', icon: Books },
+        { to: '/admin/students', label: 'الطلاب', icon: Users },
+        { to: '/admin/users', label: 'المستخدمين', icon: CalendarBlank },
     ];
 
     if (normalizedRole === 'teacher') {
@@ -112,12 +209,25 @@ export const MobileNavbar = () => {
             { to: '/admin/students', label: 'الطلاب', icon: Users },
             { to: '/admin/users', label: 'المستخدمين', icon: CalendarBlank },
         ];
-    } else if (normalizedRole === 'parent') {
+    } else if (normalizedRole === 'center_manager') {
+        items = [
+            { to: '/center-manager/dashboard', label: 'الرئيسية', icon: House },
+            { to: '/center-manager/rings', label: 'الحلقات', icon: Books },
+            { to: '/center-manager/students', label: 'الطلاب', icon: Users },
+            { to: '/center-manager/teachers', label: 'المعلمون', icon: Users },
+        ];
+    } else if (normalizedRole === 'parent' || normalizedRole === 'student') {
         items = [
             { to: '/parent/dashboard', label: 'الرئيسية', icon: House },
-            { to: '/parent/report', label: 'التقرير', icon: Books },
-            { to: '/parent/plan', label: 'الخطة', icon: CalendarBlank },
+            { to: '/parent/report', label: 'المتابعة', icon: Books },
+            { to: '/parent/competitions', label: 'المسابقات', icon: CalendarBlank },
+            { to: '/parent/plan', label: 'الخطة', icon: Books },
             { to: '/parent/notifications', label: 'الإشعارات', icon: Bell },
+        ];
+    } else if (normalizedRole === 'super_admin') {
+        items = [
+            { to: '/super/dashboard', label: 'الرئيسية', icon: House },
+            { to: '/super/tenants', label: 'المساجد', icon: Books },
         ];
     }
 

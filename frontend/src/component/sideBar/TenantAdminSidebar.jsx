@@ -1,12 +1,13 @@
 import { 
     House, Users, FolderStar, GraduationCap, ChalkboardTeacher, 
-    Books, MapPin, CalendarBlank, Medal, ChartBar, Gear, Sparkle, SignOut 
+    Books, MapPin, CalendarBlank, Medal, ChartBar, Gear, Sparkle, SignOut, User 
 } from '@phosphor-icons/react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
+import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
 
 const TenantAdminSidebar = () => {
-    const { user, logout } = useAuthContext();
+    const { logout } = useAuthContext();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -14,8 +15,6 @@ const TenantAdminSidebar = () => {
         logout();
         navigate('/login', { replace: true });
     };
-
-    const displayName = user?.username || localStorage.getItem('username') || 'مدير النظام';
 
     // مطابقة صريحة ونظيفة للمسارات لتفادي أي تداخل برمجي في الـ Active State
     const isRingsActive = location.pathname.startsWith('/admin/rings');
@@ -28,13 +27,7 @@ const TenantAdminSidebar = () => {
                 <span>مَنَارَة</span>
             </div>
             
-            <div className="user-profile">
-                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1a5c1e&color=fff&rounded=true`} alt={displayName} />
-                <div className="user-info">
-                    <h3>{displayName}</h3>
-                    <p>مدير النظام</p>
-                </div>
-            </div>
+            <UserProfileRoleSwitcher />
             
             <nav className="nav-menu">
                 <NavLink to="/admin/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -80,6 +73,10 @@ const TenantAdminSidebar = () => {
                 <NavLink to="/admin/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <Gear size={20} />
                     <span>الإعدادات</span>
+                </NavLink>
+                <NavLink to="/admin/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                    <User size={20} />
+                    <span>الملف الشخصي</span>
                 </NavLink>
             </nav>
             

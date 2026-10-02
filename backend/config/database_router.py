@@ -10,7 +10,8 @@ class TenantRouter:
         'students_and_parents',
         'attendance',
         'recitation_and_sabr',
-        'reports_and_certificates'
+        'reports_and_certificates',
+        'points_and_rewards',
     ]
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):

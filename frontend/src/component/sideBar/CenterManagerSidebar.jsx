@@ -1,12 +1,13 @@
 import { 
     House, Users, GraduationCap, ChalkboardTeacher, 
-    Books, CalendarBlank, Medal, ChartBar, Gear, Sparkle, SignOut 
+    Books, CalendarBlank, Medal, ChartBar, Gear, Sparkle, SignOut, User 
 } from '@phosphor-icons/react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
+import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
 
 const CenterManagerSidebar = () => {
-    const { user, logout } = useAuthContext();
+    const { logout } = useAuthContext();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -14,9 +15,6 @@ const CenterManagerSidebar = () => {
         logout();
         navigate('/login', { replace: true });
     };
-
-    const displayName = user?.username || localStorage.getItem('username') || 'مدير المركز';
-    const centerName = user?.center_name || localStorage.getItem('center_name');
 
     // مطابقة صريحة ونظيفة للمسارات لتفادي أي تداخل برمجي في الـ Active State
     const isRingsActive = location.pathname.startsWith('/center-manager/rings');
@@ -29,22 +27,12 @@ const CenterManagerSidebar = () => {
                 <span>مَنَارَة</span>
             </div>
             
-            <div className="user-profile">
-                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1a5c1e&color=fff&rounded=true`} alt={displayName} />
-                <div className="user-info">
-                    <h3>{displayName}</h3>
-                    <p>{centerName ? `مدير مركز (${centerName})` : 'مدير المركز'}</p>
-                </div>
-            </div>
+            <UserProfileRoleSwitcher />
             
             <nav className="nav-menu">
                 <NavLink to="/center-manager/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <House size={20} />
                     <span>الرئيسية</span>
-                </NavLink>
-                <NavLink to="/center-manager/users" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-                    <Users size={20} />
-                    <span>المستخدمون</span>
                 </NavLink>
                 <NavLink to="/center-manager/students" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <GraduationCap size={20} />
@@ -73,6 +61,10 @@ const CenterManagerSidebar = () => {
                 <NavLink to="/center-manager/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <Gear size={20} />
                     <span>الإعدادات</span>
+                </NavLink>
+                <NavLink to="/center-manager/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                    <User size={20} />
+                    <span>الملف الشخصي</span>
                 </NavLink>
             </nav>
             

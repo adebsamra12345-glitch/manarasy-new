@@ -38,3 +38,18 @@ export const impersonateUser = async (id) => {
     const response = await apiClient.post(`/api/users/${id}/impersonate/`);
     return response.data;
 };
+
+export const switchActiveRole = async (role) => {
+    const response = await apiClient.post('/api/users/switch-role/', { role });
+    return response.data;
+};
+
+export const getCurrentUser = async () => {
+    const response = await apiClient.get('/api/users/me/');
+    return response.data;
+};
+
+export const changePassword = async (data) => {
+    const response = await apiClient.post('/api/users/change-password/', data);
+    return response.data;
+};

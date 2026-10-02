@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'tenant_modules.attendance',
     'tenant_modules.recitation_and_sabr',
     'tenant_modules.reports_and_certificates',
+    'tenant_modules.points_and_rewards',
 ]
 
 MIDDLEWARE = [
@@ -177,6 +178,7 @@ MIGRATION_MODULES = {
     'attendance': 'migrations.tenant_template.attendance',
     'recitation_and_sabr': 'migrations.tenant_template.recitation_and_sabr',
     'reports_and_certificates': 'migrations.tenant_template.reports_and_certificates',
+    'points_and_rewards': 'migrations.tenant_template.points_and_rewards',
 }
 
 # تفعيل موجه قواعد البيانات

@@ -171,6 +171,9 @@ const UserDetail = () => {
         if (!formData.first_name.trim()) return 'الاسم الأول مطلوب';
         if (!formData.last_name.trim()) return 'اسم العائلة (الكنية) مطلوب';
         if (!formData.roles || formData.roles.length === 0) return 'يجب اختيار دور واحد على الأقل للمستخدم';
+        if (formData.roles.includes('CENTER_MANAGER') && !formData.center_id) {
+            return 'عذراً، يجب تحديد المركز القرآني التابع له المستخدم عند إسناد دور (مدير مركز)';
+        }
         if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
             return 'صيغة البريد الإلكتروني غير صالحة';
         }

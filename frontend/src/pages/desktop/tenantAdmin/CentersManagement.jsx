@@ -846,10 +846,7 @@ const CentersManagement = () => {
                                     <strong style={{ fontSize: '1.2rem', color: '#7b341e', fontWeight: 900 }}>{center.halaqat_count || 0}</strong>
                                 </div>
 
-                                <div style={{ background: '#faf5ff', border: '1px solid #e9d8fd', padding: '0.65rem 0.85rem', borderRadius: '12px', textAlign: 'center' }}>
-                                    <span style={{ fontSize: '0.75rem', color: '#6b46c1', fontWeight: 700, display: 'block' }}>المساجد</span>
-                                    <strong style={{ fontSize: '1.2rem', color: '#44337a', fontWeight: 900 }}>{center.mosques_count || 0}</strong>
-                                </div>
+
 
                                 <div style={{ background: '#f7fafc', border: '1px solid #e2e8f0', padding: '0.65rem 0.85rem', borderRadius: '12px', textAlign: 'center' }}>
                                     <span style={{ fontSize: '0.75rem', color: '#4a5568', fontWeight: 700, display: 'block' }}>نسبة الحضور</span>

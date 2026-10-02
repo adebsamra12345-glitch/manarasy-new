@@ -171,6 +171,22 @@ def recitation_evaluate_view(request):
                     stage_title = stage.title if stage else None
                     part_title = part.title if part else None
 
+                # فحص احتساب نقاط التسميع (عند تسميع 3 صفحات بتقييم عالي يحصل على نقطتين)
+                try:
+                    from tenant_modules.points_and_rewards.services import PointsService
+                    successful_pages_today = RecitationLog.objects.using(db_name).filter(
+                        attendance=att,
+                        requires_repeat=False
+                    ).count()
+                    if successful_pages_today > 0 and successful_pages_today % 3 == 0:
+                        PointsService.award_recitation_pages_points(
+                            db_name=db_name,
+                            student_id=str(student.id),
+                            reason=f"مكافأة إتقان: إتمام تسميع {successful_pages_today} صفحات بنجاح بتقييم عالي (+2 نقاط)"
+                        )
+                except Exception as pe:
+                    pass
+
             msg = f"تم تسجيل تقييم الصفحة ({page_num}) بنجاح. الطالب متاح لتسميع الصفحة التالية ({next_page})."
 
         return JsonResponse({

@@ -341,9 +341,12 @@ def tenant_login_view(request):
 
         profile_center_id = None
         profile_center_name = None
+        user_roles = [role]
         if target_user:
             try:
                 prof = UserProfile.objects.using(db_name).select_related('center').get(user=target_user)
+                user_roles = prof.get_roles()
+                role = prof.role
                 if prof.center:
                     profile_center_id = str(prof.center.id)
                     profile_center_name = prof.center.name
@@ -361,6 +364,7 @@ def tenant_login_view(request):
             "username": target_user.username if target_user else username,
             "user_id": str(target_user.id) if target_user else None,
             "role": role,
+            "roles": user_roles,
             "center_id": profile_center_id,
             "center_name": profile_center_name,
             "exp": now + timedelta(minutes=int(access_lifetime)),
@@ -384,7 +388,10 @@ def tenant_login_view(request):
                 "user": {
                     "id": str(target_user.id) if target_user else None,
                     "username": target_user.username if target_user else username,
+                    "first_name": target_user.first_name if target_user else '',
+                    "last_name": target_user.last_name if target_user else '',
                     "role": role,
+                    "roles": user_roles,
                     "center_id": profile_center_id,
                     "center_name": profile_center_name
                 }

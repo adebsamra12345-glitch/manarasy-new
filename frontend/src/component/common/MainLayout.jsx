@@ -22,6 +22,7 @@ const ROLE_SIDEBAR_MAP = {
     center_manager: CenterManagerSidebar,
     teacher: TeacherSidebar,
     parent: ParentSidebar,
+    student: ParentSidebar,
 };
 
 const MainLayout = () => {

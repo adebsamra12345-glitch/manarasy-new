@@ -1,17 +1,16 @@
-import { House, Buildings, CreditCard, Heartbeat, SignOut } from '@phosphor-icons/react';
+import { House, Buildings, CreditCard, Heartbeat, SignOut, User } from '@phosphor-icons/react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
+import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
 
 const SuperAdminSidebar = () => {
-    const { user, logout } = useAuthContext();
+    const { logout } = useAuthContext();
     const navigate = useNavigate();
 
     const handleLogout = () => {
         logout();
         navigate('/login', { replace: true });
     };
-
-    const displayName = user?.username || localStorage.getItem('username') || 'Super Admin';
 
     return (
         <aside id="super-admin-sidebar" className="sidebar-container hide-on-mobile">
@@ -20,13 +19,7 @@ const SuperAdminSidebar = () => {
                 <span>مَنَارَة</span>
             </div>
 
-            <div className="user-profile">
-                <img src={`https://ui-avatars.com/api/?name=${displayName}&background=1a3a5c&color=fff&rounded=true`} alt={displayName} />
-                <div className="user-info">
-                    <h3>{displayName}</h3>
-                    <p>مدير النظام الرئيسي</p>
-                </div>
-            </div>
+            <UserProfileRoleSwitcher />
 
             <nav className="nav-menu">
                 <NavLink to="/super/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -44,6 +37,10 @@ const SuperAdminSidebar = () => {
                 <NavLink to="/super/health" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <Heartbeat size={20} />
                     صحة النظام
+                </NavLink>
+                <NavLink to="/super/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                    <User size={20} />
+                    الملف الشخصي
                 </NavLink>
             </nav>
 

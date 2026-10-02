@@ -1,4 +1,4 @@
-﻿/* ===== Sidebar Styles ===== */
+/* ===== Sidebar Styles ===== */
 .sidebar-container {
     width: 260px;
     min-height: 100vh;
@@ -47,3 +47,149 @@
 .nav-item:hover  { background: rgba(255,255,255,0.08); color: #fff; }
 .nav-item.active { background: rgba(255,255,255,0.15); color: #fff; font-weight: 600; }
 .sidebar-bottom  { margin-top: auto; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
+
+/* ===== User Profile & Role Switcher ===== */
+.user-profile-role-switcher {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+.user-profile.has-multiple-roles {
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.user-profile.has-multiple-roles:hover,
+.user-profile.dropdown-active {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+.role-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    left: 0;
+    background: #102a12;
+    background: linear-gradient(180deg, #163d19 0%, #0d230f 100%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 14px;
+    padding: 0.65rem;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    z-index: 999;
+    direction: rtl;
+    animation: fadeInDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    backdrop-filter: blur(8px);
+}
+.role-dropdown-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 0.2rem 0.5rem 0.5rem;
+    font-weight: 700;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.2px;
+}
+.role-dropdown-count {
+    background: rgba(255, 255, 255, 0.12);
+    color: #81c784;
+    padding: 0.1rem 0.55rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.role-dropdown-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.role-dropdown-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.88rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+    text-align: right;
+}
+.role-dropdown-item-content {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+}
+.role-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.role-item-icon.active {
+    background: rgba(129, 199, 132, 0.2);
+    color: #81c784;
+}
+.role-item-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+}
+.role-item-title {
+    font-weight: 600;
+    font-size: 0.88rem;
+}
+.active-badge {
+    font-size: 0.68rem;
+    color: #a5d6a7;
+    font-weight: 700;
+    line-height: 1;
+}
+.role-dropdown-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    transform: translateX(-2px);
+}
+.role-dropdown-item.active {
+    background: linear-gradient(90deg, rgba(85, 139, 47, 0.45) 0%, rgba(46, 125, 50, 0.65) 100%);
+    border: 1px solid rgba(129, 199, 132, 0.4);
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.role-check-icon {
+    color: #81c784;
+    flex-shrink: 0;
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+.spin-icon {
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

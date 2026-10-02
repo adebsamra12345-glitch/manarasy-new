@@ -42,12 +42,28 @@ const Login = ({ onLoginSuccess }) => {
         try {
             const data = await login(form);
             if (data.status === 'success') {
+                const userRoles = Array.isArray(data.data.user.roles) && data.data.user.roles.length > 0
+                    ? Array.from(new Set(data.data.user.roles))
+                    : [data.data.user.role];
+
+                const userData = {
+                    id: data.data.user.id,
+                    username: data.data.user.username,
+                    first_name: data.data.user.first_name || '',
+                    last_name: data.data.user.last_name || '',
+                    role: data.data.user.role,
+                    roles: userRoles,
+                    tenant_id: data.data.tenant.id,
+                    tenant_name: data.data.tenant.name,
+                };
                 localStorage.setItem('access_token', data.data.access_token);
                 localStorage.setItem('tenant_id', data.data.tenant.id);
                 localStorage.setItem('tenant_name', data.data.tenant.name);
                 localStorage.setItem('user_role', data.data.user.role);
+                localStorage.setItem('user_roles', JSON.stringify(userRoles));
                 localStorage.setItem('username', data.data.user.username);
-                onLoginSuccess();
+                localStorage.setItem('user', JSON.stringify(userData));
+                if (onLoginSuccess) onLoginSuccess();
             } else {
                 setError(data.message || 'فشل تسجيل الدخول');
             }

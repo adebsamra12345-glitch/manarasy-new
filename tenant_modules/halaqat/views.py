@@ -122,9 +122,15 @@ def check_halaqa_permission(request, db_name, center=None):
 
         # بالنسبة لمدير المركز، يجب أن يكون مديراً للمركز التابعة له الحلقة
         if center:
-            if not center.manager:
-                return False
-            if center.manager.username != username and (not user_id or str(center.manager.id) != str(user_id)):
+            is_manager_of_center = False
+            if center.manager and (center.manager.username == username or (user_id and str(center.manager.id) == str(user_id))):
+                is_manager_of_center = True
+            elif user_id and UserProfile.objects.using(db_name).filter(user__id=user_id, center=center, role='CENTER_MANAGER').exists():
+                is_manager_of_center = True
+            elif username and UserProfile.objects.using(db_name).filter(user__username=username, center=center, role='CENTER_MANAGER').exists():
+                is_manager_of_center = True
+
+            if not is_manager_of_center:
                 return False
 
         return True
@@ -197,11 +203,26 @@ def halaqa_list_create_view(request):
                 else:
                     return JsonResponse({"status": "error", "message": "خطأ في التحقق من الهوية"}, status=401)
 
-            halaqat = Halaqa.objects.using(db_name).filter(is_active=True)
+            halaqat = Halaqa.objects.using(db_name).filter(is_active=True, deleted_at__isnull=True)
 
             # إذا كان المستخدم معلماً، نُصفّي الحلقات المخصصة له فقط
             if teacher_name is not None:
                 halaqat = halaqat.filter(teacher_name=teacher_name)
+
+            payload = get_token_payload(request)
+            if payload and payload.get('role') == 'CENTER_MANAGER':
+                username = payload.get('username')
+                user_id = payload.get('user_id')
+                try:
+                    prof = UserProfile.objects.using(db_name).get(user__username=username) if username else None
+                    if not prof and user_id:
+                        prof = UserProfile.objects.using(db_name).get(user__id=user_id)
+                    if prof and prof.center:
+                        halaqat = halaqat.filter(center=prof.center)
+                    else:
+                        halaqat = halaqat.none()
+                except Exception:
+                    halaqat = halaqat.none()
 
             halaqat = halaqat.select_related('center', 'project').order_by('-created_at')
             res = []
@@ -246,12 +267,13 @@ def halaqa_list_create_view(request):
             except Center.DoesNotExist:
                 return JsonResponse({"status": "error", "message": "المركز المحدد غير موجود"}, status=404)
 
-            project = None
-            if project_id:
-                try:
-                    project = Project.objects.using(db_name).get(id=project_id)
-                except Project.DoesNotExist:
-                    return JsonResponse({"status": "error", "message": "المشروع المحدد غير موجود"}, status=404)
+            if not project_id:
+                return JsonResponse({"status": "error", "message": "المشروع حقل إلزامي. لا يمكن إنشاء أي حلقة دون اختيار مشروع."}, status=400)
+
+            try:
+                project = Project.objects.using(db_name).get(id=project_id)
+            except Project.DoesNotExist:
+                return JsonResponse({"status": "error", "message": "المشروع المحدد غير موجود"}, status=404)
 
             # التحقق من الصلاحيات (أدمن أو مدير مركز)
             if not check_halaqa_permission(request, db_name, center=center):
@@ -265,7 +287,7 @@ def halaqa_list_create_view(request):
 
             clean_name = name.strip()
             # فحص وجود حلقة نشطة بنفس الاسم
-            existing_halaqat = Halaqa.objects.using(db_name).filter(is_active=True, name__iexact=clean_name)
+            existing_halaqat = Halaqa.objects.using(db_name).filter(is_active=True, deleted_at__isnull=True, name__iexact=clean_name)
 
             if existing_halaqat.exists():
                 same_center = False
@@ -353,6 +375,19 @@ def halaqa_detail_view(request, pk):
         if teacher_name is not None and halaqa.teacher_name != teacher_name:
             return JsonResponse({"status": "error", "message": "غير مصرح لك بالوصول إلى هذه الحلقة"}, status=403)
 
+        payload = get_token_payload(request)
+        if payload and payload.get('role') == 'CENTER_MANAGER':
+            username = payload.get('username')
+            user_id = payload.get('user_id')
+            try:
+                prof = UserProfile.objects.using(db_name).get(user__username=username) if username else None
+                if not prof and user_id:
+                    prof = UserProfile.objects.using(db_name).get(user__id=user_id)
+                if not prof or not prof.center or not halaqa.center or str(prof.center.id) != str(halaqa.center.id):
+                    return JsonResponse({"status": "error", "message": "غير مصرح لمدير المركز بالوصول إلى حلقات خارج مركزه"}, status=403)
+            except Exception:
+                return JsonResponse({"status": "error", "message": "غير مصرح لمدير المركز بالوصول إلى حلقات خارج مركزه"}, status=403)
+
         return JsonResponse({
             "status": "success",
             "data": {
@@ -395,22 +430,71 @@ def halaqa_detail_view(request, pk):
                 )
 
             if 'project_id' in data:
-                if data['project_id']:
-                    try:
-                        halaqa.project = Project.objects.using(db_name).get(id=data['project_id'])
-                    except Project.DoesNotExist:
-                        return JsonResponse({"status": "error", "message": "المشروع المحدد غير موجود"}, status=404)
-                else:
-                    halaqa.project = None
+                if not data['project_id']:
+                    return JsonResponse({"status": "error", "message": "المشروع حقل إلزامي لجميع الحلقات ولا يمكن إزالته"}, status=400)
+                try:
+                    halaqa.project = Project.objects.using(db_name).get(id=data['project_id'])
+                except Project.DoesNotExist:
+                    return JsonResponse({"status": "error", "message": "المشروع المحدد غير موجود"}, status=404)
 
-            halaqa.name = data.get('name', halaqa.name).strip()
+            new_name = data.get('name', halaqa.name).strip()
+            confirm_duplicate = data.get('confirm_duplicate', False)
+
+            if not new_name:
+                return JsonResponse({"status": "error", "message": "اسم الحلقة لا يمكن أن يكون فارغاً"}, status=400)
+
+            # فحص وجود حلقة نشطة بنفس الاسم مع استثناء الحلقة الحالية
+            existing_halaqat = Halaqa.objects.using(db_name).filter(
+                is_active=True,
+                deleted_at__isnull=True,
+                name__iexact=new_name
+            ).exclude(id=halaqa.id)
+
+            if existing_halaqat.exists() and not confirm_duplicate:
+                same_center = False
+                other_center = False
+                for eh in existing_halaqat:
+                    if center and eh.center and str(eh.center.id) == str(center.id):
+                        same_center = True
+                    elif not center and not eh.center:
+                        same_center = True
+                    else:
+                        other_center = True
+
+                if same_center:
+                    return JsonResponse({
+                        "status": "warning_duplicate",
+                        "message": "توجد حلقة أخرى بنفس الاسم في هذا المسجد/المركز، هل ترغب في الاستمرار بالتعديل أم لا؟",
+                        "requires_confirmation": True
+                    }, status=400)
+                elif other_center:
+                    return JsonResponse({
+                        "status": "warning_other_center",
+                        "message": "تنبيه: توجد حلقة بنفس الاسم في مركز آخر، هل ترغب في الاستمرار بالتعديل أم لا؟",
+                        "requires_confirmation": True
+                    }, status=400)
+
+            halaqa.name = new_name
             halaqa.teacher_name = resolved_teacher_name
             halaqa.center = center
             if 'is_active' in data:
                 halaqa.is_active = data['is_active']
             halaqa.save(using=db_name)
 
-            return JsonResponse({"status": "success", "message": "تم تعديل بيانات الحلقة بنجاح"})
+            return JsonResponse({
+                "status": "success",
+                "message": "تم تعديل بيانات الحلقة القرآنية بنجاح",
+                "data": {
+                    "id": str(halaqa.id),
+                    "name": halaqa.name,
+                    "teacher_name": halaqa.teacher_name,
+                    "center_id": str(halaqa.center.id) if halaqa.center else None,
+                    "center_name": halaqa.center.name if halaqa.center else None,
+                    "project_id": str(halaqa.project.id) if halaqa.project else None,
+                    "project_title": halaqa.project.title if halaqa.project else None,
+                    "is_active": halaqa.is_active
+                }
+            }, status=200)
         except Exception as e:
             return JsonResponse({"status": "error", "message": "فشل تعديل بيانات الحلقة", "details": str(e)}, status=500)
 
@@ -438,10 +522,11 @@ def halaqa_detail_view(request, pk):
             return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدمن أو مدير المركز مطلوبة لحذف الحلقة. لا يحق للمعلم أو ولي الأمر القيام بذلك."}, status=403)
 
         try:
+            halaqa_name = halaqa.name
             halaqa.is_active = False
             halaqa.deleted_at = timezone.now()
             halaqa.save(using=db_name)
-            return JsonResponse({"status": "success", "message": "تم حذف (إلغاء تنشيط) الحلقة بنجاح"})
+            return JsonResponse({"status": "success", "message": f"تم حذف حلقة ({halaqa_name}) بنجاح"})
         except Exception as e:
             return JsonResponse({"status": "error", "message": "فشل حذف الحلقة", "details": str(e)}, status=500)
 

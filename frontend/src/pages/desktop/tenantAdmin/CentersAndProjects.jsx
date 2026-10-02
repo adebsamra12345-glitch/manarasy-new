@@ -10,11 +10,13 @@ import {
     deleteProject,
     getProjectStages,
     createProjectStage,
+    updateProjectStage,
     deleteProjectStage,
     createStagePart,
     deleteStagePart,
     getEvaluationTemplates,
     getExamTemplates,
+    getTestRubrics,
     getCentersList
 } from '../../../services/api/tenantService';
 import TestsModule from './tests/TestsModule';
@@ -44,6 +46,7 @@ const CentersAndProjects = () => {
     const [projects, setProjects] = useState([]);
     const [examTemplates, setExamTemplates] = useState([]);
     const [evaluationTemplates, setEvaluationTemplates] = useState([]);
+    const [testRubrics, setTestRubrics] = useState([]);
     const [centersList, setCentersList] = useState([{ id: 'all', name: 'المركز الرئيسي' }]);
     const [selectedCenterId, setSelectedCenterId] = useState('all');
 
@@ -62,6 +65,7 @@ const CentersAndProjects = () => {
     const [isGlobal, setIsGlobal] = useState(true);
     const [requireExam, setRequireExam] = useState(false);
     const [selectedEvalId, setSelectedEvalId] = useState('');
+    const [selectedRubricId, setSelectedRubricId] = useState('');
     const [selectedCenters, setSelectedCenters] = useState([]);
     const [saving, setSaving] = useState(false);
     const [deletingProjectId, setDeletingProjectId] = useState(null);
@@ -72,6 +76,7 @@ const CentersAndProjects = () => {
     const [stagesList, setStagesList] = useState([]);
     const [loadingStages, setLoadingStages] = useState(false);
     const [newStageTitle, setNewStageTitle] = useState('');
+    const [newStageHasExam, setNewStageHasExam] = useState(false);
     const [addingStage, setAddingStage] = useState(false);
 
     // Modal States: Parts
@@ -87,10 +92,11 @@ const CentersAndProjects = () => {
         setLoading(true);
         setError(null);
         try {
-            const [projRes, evalRes, examRes, centersRes] = await Promise.all([
+            const [projRes, evalRes, examRes, rubricsRes, centersRes] = await Promise.all([
                 getProjects().catch(() => ({ status: 'error', data: [] })),
                 getEvaluationTemplates().catch(() => ({ status: 'error', data: [] })),
                 getExamTemplates().catch(() => ({ status: 'error', data: [] })),
+                getTestRubrics().catch(() => ({ status: 'error', data: [] })),
                 getCentersList().catch(() => ({ status: 'error', data: [] }))
             ]);
 
@@ -105,6 +111,9 @@ const CentersAndProjects = () => {
             }
             if (examRes && examRes.data) {
                 setExamTemplates(examRes.data);
+            }
+            if (rubricsRes && rubricsRes.data) {
+                setTestRubrics(rubricsRes.data);
             }
             if (centersRes && centersRes.data && centersRes.data.length > 0) {
                 setCentersList([{ id: 'all', name: 'المركز الرئيسي' }, ...centersRes.data.filter(c => c.name !== 'المركز الرئيسي')]);
@@ -140,6 +149,7 @@ const CentersAndProjects = () => {
         } else {
             setSelectedEvalId('');
         }
+        setSelectedRubricId('');
         setIsProjectModalOpen(true);
     };
 
@@ -152,6 +162,7 @@ const CentersAndProjects = () => {
         setIsGlobal(proj.is_global ?? true);
         setRequireExam(proj.require_exam_for_all_stages || false);
         setSelectedEvalId(proj.evaluation_template_id || proj.evaluation_template?.id || '');
+        setSelectedRubricId(proj.test_rubric_id || proj.test_rubric?.id || '');
         if (proj.centers && proj.centers.length > 0) {
             setSelectedCenters(proj.centers.map(c => c.id));
         }
@@ -178,6 +189,7 @@ const CentersAndProjects = () => {
             is_global: isGlobal,
             require_exam_for_all_stages: requireExam,
             evaluation_template_id: selectedEvalId,
+            test_rubric_id: selectedRubricId || null,
             center_ids: isGlobal ? [] : selectedCenters
         };
 
@@ -268,12 +280,14 @@ const CentersAndProjects = () => {
         try {
             const payload = {
                 title: newStageTitle.trim(),
+                has_exam: newStageHasExam,
                 order: stagesList.length + 1
             };
             const res = await createProjectStage(selectedProjectForStages.id, payload);
             if (res.status === 'success') {
                 showToast('تمت إضافة المرحلة بنجاح');
                 setNewStageTitle('');
+                setNewStageHasExam(false);
                 const updatedRes = await getProjectStages(selectedProjectForStages.id);
                 if (updatedRes.data) setStagesList(updatedRes.data);
                 fetchInitialData();
@@ -283,6 +297,22 @@ const CentersAndProjects = () => {
             showToast('فشلت إضافة المرحلة');
         } finally {
             setAddingStage(false);
+        }
+    };
+
+    // Toggle Stage Has Exam
+    const handleToggleStageExam = async (stage) => {
+        try {
+            const updatedHasExam = !stage.has_exam;
+            const res = await updateProjectStage(stage.id, { has_exam: updatedHasExam });
+            if (res.status === 'success') {
+                showToast(`تم ${updatedHasExam ? 'تفعيل' : 'إلغاء'} خيار الامتحان لهذه المرحلة`);
+                setStagesList(prev => prev.map(s => s.id === stage.id ? { ...s, has_exam: updatedHasExam } : s));
+                fetchInitialData();
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('فشل تعديل خيار الامتحان للمرحلة');
         }
     };
 
@@ -1020,6 +1050,32 @@ const CentersAndProjects = () => {
 
                             <div style={{ marginBottom: '1.15rem' }}>
                                 <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem' }}>
+                                    سلم الاختبار
+                                </label>
+                                <select
+                                    value={selectedRubricId}
+                                    onChange={(e) => setSelectedRubricId(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.65rem 0.9rem',
+                                        borderRadius: '8px',
+                                        border: '1px solid #cbd5e1',
+                                        fontSize: '0.95rem',
+                                        outline: 'none',
+                                        boxSizing: 'border-box',
+                                        background: '#fff',
+                                        fontFamily: 'inherit'
+                                    }}
+                                >
+                                    <option value="">-- اختر سلم الاختبار (اختياري) --</option>
+                                    {testRubrics.map((r) => (
+                                        <option key={r.id} value={r.id}>{r.title}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div style={{ marginBottom: '1.15rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem' }}>
                                     نوع المشروع
                                 </label>
                                 <select
@@ -1181,39 +1237,49 @@ const CentersAndProjects = () => {
                         </div>
 
                         {/* Add New Stage Box */}
-                        <div style={{ display: 'flex', gap: '8px', marginBottom: '1.5rem' }}>
-                            <input
-                                type="text"
-                                placeholder="اسم المرحلة الجديد (مثال: المرحلة 6)"
-                                value={newStageTitle}
-                                onChange={(e) => setNewStageTitle(e.target.value)}
-                                style={{
-                                    flex: 1,
-                                    padding: '0.6rem 0.9rem',
-                                    borderRadius: '8px',
-                                    border: '1px solid #cbd5e1',
-                                    fontSize: '0.92rem',
-                                    outline: 'none',
-                                    fontFamily: 'inherit'
-                                }}
-                            />
-                            <button
-                                onClick={handleAddStage}
-                                disabled={addingStage || !newStageTitle.trim()}
-                                style={{
-                                    background: '#e25c1d',
-                                    color: '#ffffff',
-                                    border: 'none',
-                                    padding: '0.6rem 1.4rem',
-                                    borderRadius: '8px',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    opacity: addingStage ? 0.7 : 1,
-                                    fontFamily: 'inherit'
-                                }}
-                            >
-                                {addingStage ? 'جاري الإضافة...' : 'إضافة مرحلة'}
-                            </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '1.5rem' }}>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    type="text"
+                                    placeholder="اسم المرحلة الجديد (مثال: المرحلة 6)"
+                                    value={newStageTitle}
+                                    onChange={(e) => setNewStageTitle(e.target.value)}
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.6rem 0.9rem',
+                                        borderRadius: '8px',
+                                        border: '1px solid #cbd5e1',
+                                        fontSize: '0.92rem',
+                                        outline: 'none',
+                                        fontFamily: 'inherit'
+                                    }}
+                                />
+                                <button
+                                    onClick={handleAddStage}
+                                    disabled={addingStage || !newStageTitle.trim()}
+                                    style={{
+                                        background: '#e25c1d',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        padding: '0.6rem 1.4rem',
+                                        borderRadius: '8px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        opacity: addingStage ? 0.7 : 1,
+                                        fontFamily: 'inherit'
+                                    }}
+                                >
+                                    {addingStage ? 'جاري الإضافة...' : 'إضافة مرحلة'}
+                                </button>
+                            </div>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem', color: '#475569', cursor: 'pointer' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={newStageHasExam}
+                                    onChange={(e) => setNewStageHasExam(e.target.checked)}
+                                />
+                                <span>إجراء امتحان بعد إنهاء هذه المرحلة</span>
+                            </label>
                         </div>
 
                         {/* Stages List */}
@@ -1256,13 +1322,36 @@ const CentersAndProjects = () => {
                                             </span>
                                         </div>
 
-                                        <button
-                                            onClick={() => handleDeleteStage(st.id)}
-                                            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '4px' }}
-                                            title="حذف المرحلة"
-                                        >
-                                            <Trash size={18} />
-                                        </button>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <button
+                                                onClick={() => handleToggleStageExam(st)}
+                                                style={{
+                                                    background: st.has_exam ? '#dcfce7' : '#f1f5f9',
+                                                    color: st.has_exam ? '#166534' : '#64748b',
+                                                    border: `1px solid ${st.has_exam ? '#86efac' : '#cbd5e1'}`,
+                                                    padding: '0.35rem 0.75rem',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.82rem',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px'
+                                                }}
+                                                title="تغيير خيار امتحان المرحلة"
+                                            >
+                                                <Exam size={14} />
+                                                <span>امتحان: {st.has_exam ? 'نعم' : 'لا'}</span>
+                                            </button>
+
+                                            <button
+                                                onClick={() => handleDeleteStage(st.id)}
+                                                style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '4px' }}
+                                                title="حذف المرحلة"
+                                            >
+                                                <Trash size={18} />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>

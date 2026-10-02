@@ -104,6 +104,8 @@ class StudentRegistrationRequest(models.Model):
     reached_page = models.IntegerField(default=1)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    reviewed_by = models.ForeignKey('users.UserProfile', on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_registration_requests')
+    rejection_reason = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

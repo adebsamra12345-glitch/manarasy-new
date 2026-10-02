@@ -22,6 +22,7 @@ class UserProfile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=50, choices=ROLE_CHOICES, default='STUDENT')
+    roles = models.JSONField(default=list, blank=True, null=True)
     center = models.ForeignKey(Center, on_delete=models.SET_NULL, null=True, blank=True, related_name='user_profiles')
     father_name = models.CharField(max_length=150, null=True, blank=True)
     mother_name = models.CharField(max_length=150, null=True, blank=True)
@@ -53,8 +54,35 @@ class UserProfile(models.Model):
     class Meta:
         db_table = 'user_profiles'
 
+    def get_roles(self):
+        if self.roles and isinstance(self.roles, list) and len(self.roles) > 0:
+            return self.roles
+        return [self.role] if self.role else ['STUDENT']
+
+    def set_roles(self, role_list):
+        if not role_list or not isinstance(role_list, list) or len(role_list) == 0:
+            role_list = ['STUDENT']
+        seen = set()
+        clean_roles = [r for r in role_list if not (r in seen or seen.add(r))]
+        self.roles = clean_roles
+        self.role = clean_roles[0]
+
+    def save(self, *args, **kwargs):
+        if self.roles and isinstance(self.roles, list) and len(self.roles) > 0:
+            seen = set()
+            clean_roles = [r for r in self.roles if not (r in seen or seen.add(r))]
+            self.roles = clean_roles
+            if self.role not in clean_roles:
+                self.role = clean_roles[0]
+        elif self.role:
+            self.roles = [self.role]
+        else:
+            self.role = 'STUDENT'
+            self.roles = ['STUDENT']
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.user.username} ({self.role})"
+        return f"{self.user.username} ({', '.join(self.get_roles())})"
 
 
 class AccountRequest(models.Model):

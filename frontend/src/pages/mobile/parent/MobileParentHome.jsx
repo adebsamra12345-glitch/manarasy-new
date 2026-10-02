@@ -1,14 +1,13 @@
-﻿/**
+import React from 'react';
+import ParentDashboard from '../../desktop/parent/ParentDashboard';
+
+/**
  * MobileParentHome
- * الصفحة الرئيسية لولي الأمر على الهاتف
+ * الواجهة الرئيسية لحساب الطالب وولي الأمر على الموبايل
+ * متطابقة 100% بالوظائف والصلاحيات والبيانات مع واجهة الحاسوب
  */
 const MobileParentHome = () => {
-    return (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-            <h2 style={{ color: 'var(--primary-green, #133315)', marginBottom: '0.75rem' }}>الرئيسية</h2>
-            <p style={{ color: '#888' }}>الصفحة الرئيسية لولي الأمر على الهاتف</p>
-        </div>
-    );
+    return <ParentDashboard />;
 };
 
 export default MobileParentHome;
