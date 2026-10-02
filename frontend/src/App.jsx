@@ -31,6 +31,7 @@ import AdminRingSessions from './pages/desktop/tenantAdmin/AdminRingSessions';
 import AdminSessionDetail from './pages/desktop/tenantAdmin/AdminSessionDetail';
 import AdminReports from './pages/desktop/tenantAdmin/AdminReports';
 import StudentActivityPage from './pages/desktop/tenantAdmin/StudentActivityPage';
+import AdminSettings from './pages/desktop/tenantAdmin/AdminSettings';
 
 
 
@@ -158,7 +159,7 @@ function App() {
                                 <Route path="reports/student-activity/:studentId" element={<StudentActivityPage />} />
                                 <Route path="students/:studentId/activity" element={<StudentActivityPage />} />
 
-                                <Route path="settings" element={<PlaceholderView title="الإعدادات" />} />
+                                <Route path="settings" element={<AdminSettings />} />
 
                             </Route>
 

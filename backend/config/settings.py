@@ -153,6 +153,12 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# الملفات المرفوعة (شعارات المساجد)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+# الحد الأقصى لحجم شعار المسجد (2MB)
+TENANT_LOGO_MAX_BYTES = 2 * 1024 * 1024
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 

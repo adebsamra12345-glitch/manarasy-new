@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import path, include
 from core_system.tenants.views import health_check_view
 
@@ -27,3 +29,7 @@ urlpatterns = [
     path('api/', include(api_urlpatterns)),
     path('', include(api_urlpatterns)),
 ]
+
+# تقديم الملفات المرفوعة (شعارات المساجد) أثناء التطوير
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
