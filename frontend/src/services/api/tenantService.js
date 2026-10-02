@@ -476,3 +476,24 @@ export const saveMosqueBulkSchedule = async (data) => {
 };
 
 
+
+// ===== إعدادات المسجد =====
+/** بيانات عامة (اسم + شعار) لبطاقة تسجيل الدخول، بدون مصادقة */
+export const getTenantBranding = async (subdomain) => {
+    const response = await apiClient.get('/api/tenants/branding/', { params: { subdomain } });
+    return response.data;
+};
+
+export const getTenantSettings = async () => {
+    const response = await apiClient.get('/api/tenants/settings/');
+    return response.data;
+};
+
+/** @param {FormData} formData — الحقول: name, logo (ملف), remove_logo ('true') */
+export const updateTenantSettings = async (formData) => {
+    // apiClient يضبط application/json افتراضياً، وهذا يجعل axios يحوّل FormData إلى JSON
+    const response = await apiClient.post('/api/tenants/settings/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+};

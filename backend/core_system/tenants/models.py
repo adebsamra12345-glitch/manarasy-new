@@ -18,6 +18,9 @@ class Tenant(models.Model):
     # كلمة مرور مدير المسجد الافتراضي (manager)
     admin_password_hash = models.CharField(max_length=255, default='')
 
+    # شعار المسجد (اختياري) - يُعرض في بطاقة تسجيل الدخول ولوحة الإعدادات
+    logo = models.FileField(upload_to='tenant_logos/', null=True, blank=True)
+
     is_active = models.BooleanField(default=True)
     is_rewards_store_enabled = models.BooleanField(default=True, help_text="فتح أو إغلاق متجر المكافآت على مستوى المسجد")
     contact_phone = models.CharField(max_length=20)

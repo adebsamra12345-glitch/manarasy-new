@@ -833,6 +833,51 @@ body {
     color: var(--text-secondary);
 }
 
+/* هوية المسجد (شعار + اسم) أعلى بطاقة تسجيل الدخول — أبعاد ثابتة لتفادي أي تغير في ارتفاع البطاقة */
+.login-card-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 1.25rem;
+}
+
+.login-card-logo {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    border: 2px solid rgba(0,0,0,0.06);
+    background: var(--bg-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.login-card-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.login-card-logo-fallback {
+    font-size: 2.2rem;
+    color: var(--primary-green);
+}
+
+.login-card-mosque-name {
+    max-width: 100%;
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1.6;
+    color: var(--text-primary);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .login-form {
     display: flex;
     flex-direction: column;

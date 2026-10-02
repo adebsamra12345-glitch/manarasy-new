@@ -80,7 +80,7 @@ const PrivateRoute = ({ children, allowedRoles }) => {
     const { isLoggedIn, role } = useAuthContext();
 
     if (!isLoggedIn) return <Navigate to="/login" replace />;
-    
+
     const normalizedRole = role ? role.toLowerCase() : '';
 
     if (allowedRoles && !allowedRoles.map(r => r.toLowerCase()).includes(normalizedRole)) {
@@ -97,7 +97,7 @@ const PrivateRoute = ({ children, allowedRoles }) => {
 const RoleBasedRedirect = () => {
     const { isLoggedIn, role } = useAuthContext();
     if (!isLoggedIn) return <Navigate to="/login" replace />;
-    
+
     const normalizedRole = role ? role.toLowerCase() : '';
     const route = ROLE_DEFAULT_ROUTE[normalizedRole] || '/login';
     return <Navigate to={route} replace />;
