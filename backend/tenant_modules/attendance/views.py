@@ -286,6 +286,13 @@ def session_start_view(request):
                         behavior='EXCELLENT'
                     )
 
+                    if status_val in ['ABSENT', 'EXCUSED']:
+                        try:
+                            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                            StudentNotificationService.notify_absence(db_name, att)
+                        except Exception as ne:
+                            pass
+
                     current_reached = st.reached_page or 1
                     next_reciting_page = current_reached + 1 if current_reached > 0 else 1
 
@@ -688,6 +695,13 @@ def session_detail_view(request, pk):
                             att.behavior = st_data['behavior']
                         att.notes = st_data.get('notes', att.notes)
                         att.save(using=db_name)
+
+                        if att.status in ['ABSENT', 'EXCUSED']:
+                            try:
+                                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                                StudentNotificationService.notify_absence(db_name, att)
+                            except Exception as ne:
+                                pass
 
             return JsonResponse({
                 "status": "success",

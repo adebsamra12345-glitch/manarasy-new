@@ -14,7 +14,6 @@ const ROLE_LABELS = {
     TEACHER: 'معلم',
     CENTER_MANAGER: 'مدير مركز',
     TENANT_ADMIN: 'مدير نظام',
-    PARENT: 'ولي أمر',
     SUPER_ADMIN: 'مدير خارق'
 };
 

@@ -3,17 +3,19 @@ import {
     Books, MapPin, CalendarBlank, Medal, ChartBar, Gear, Sparkle, SignOut 
 } from '@phosphor-icons/react';
 import { NavLink } from 'react-router-dom';
+import BrandLogo from '../component/common/BrandLogo';
+import UserAvatar from '../component/common/UserAvatar';
 
 const Sidebar = () => {
     return (
         <aside id="desktop-sidebar-container" className="sidebar-container hide-on-mobile">
             <div className="sidebar-logo">
-                <img src="https://ui-avatars.com/api/?name=م&background=133315&color=fff&rounded=true" alt="شعار منارة" />
+                <BrandLogo size={36} />
                 <span>مَنَارَة</span>
             </div>
             
             <div className="user-profile">
-                <img src="https://i.pravatar.cc/150?img=11" alt="محمد العمري" />
+                <UserAvatar name="محمد العمري" size={40} background="#1a5c1e" />
                 <div className="user-info">
                     <h3>أ. محمد العمري</h3>
                     <p>مدير النظام</p>

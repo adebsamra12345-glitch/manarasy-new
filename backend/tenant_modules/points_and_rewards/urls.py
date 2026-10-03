@@ -23,6 +23,10 @@ urlpatterns = [
     path('student-portal/dashboard/', views.student_portal_dashboard_view, name='student_portal_dashboard'),
     path('student-portal/points-store/', views.student_portal_points_store_view, name='student_portal_points_store'),
     path('student-portal/claim-reward/', views.student_portal_claim_reward_view, name='student_portal_claim_reward'),
+    path('student-portal/follow-up/', views.student_portal_follow_up_view, name='student_portal_follow_up'),
+    path('student-portal/notifications/', views.student_portal_notifications_view, name='student_portal_notifications'),
+    path('student-portal/notifications/mark-read/', views.student_portal_mark_notification_read_view, name='student_portal_mark_all_read'),
+    path('student-portal/notifications/<uuid:pk>/read/', views.student_portal_mark_notification_read_view, name='student_portal_mark_one_read'),
 
     # 6. المسابقات
     path('competitions/', views.competitions_list_create_view, name='competitions_list_create'),

@@ -14,9 +14,10 @@ import {
     submitStudentCompetition
 } from '../../../services/pointsAndRewardsApi';
 import StudentCompetitionQuiz from '../../mobile/student/StudentCompetitionQuiz';
+import StudentFollowUpSection from './StudentFollowUpSection';
 import './studentParentPortal.css';
 
-const ParentDashboard = () => {
+const StudentDashboard = () => {
     // Current Active Tab: 'dashboard' | 'rewards' | 'competitions' | 'report'
     const [activeTab, setActiveTab] = useState('dashboard');
 
@@ -669,44 +670,10 @@ const ParentDashboard = () => {
             )}
 
             {/* =========================================================
-                TAB 4: REPORT & RECITATIONS
+                TAB 4: REPORT & RECITATIONS (سجل المتابعة والتقييمات المتكامل)
             ========================================================= */}
             {activeTab === 'report' && (
-                <div className="portal-section-card">
-                    <div className="portal-section-header">
-                        <h3>
-                            <ChartBar size={20} color="#133315" />
-                            سجل التسميع والحفظ المتقدم
-                        </h3>
-                    </div>
-
-                    <div style={{ overflowX: 'auto' }}>
-                        <table className="portal-table">
-                            <thead>
-                                <tr>
-                                    <th>التاريخ</th>
-                                    <th>الجلسة</th>
-                                    <th>الحضور</th>
-                                    <th>التقييم</th>
-                                    <th>السلوك</th>
-                                    <th>ملاحظات المعلم</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {followUps.map((row) => (
-                                    <tr key={row.id}>
-                                        <td style={{ fontWeight: 600 }}>{row.date}</td>
-                                        <td>{row.session}</td>
-                                        <td>{row.attendance}</td>
-                                        <td style={{ fontWeight: 600, color: '#133315' }}>{row.evaluation}</td>
-                                        <td>{row.behavior}</td>
-                                        <td>{row.notes || '-'}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                <StudentFollowUpSection studentId={selectedStudentId} />
             )}
 
             {/* =========================================================
@@ -774,4 +741,4 @@ const ParentDashboard = () => {
     );
 };
 
-export default ParentDashboard;
+export default StudentDashboard;

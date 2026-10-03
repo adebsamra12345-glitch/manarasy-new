@@ -1,0 +1,394 @@
+/* ==========================================================================
+   UserProfileRoleSwitcher - Luxury Modern Design System
+   ========================================================================== */
+
+.role-switcher-container {
+    position: relative;
+    width: 100%;
+    margin-bottom: 1.5rem;
+    direction: rtl;
+    font-family: 'Tajawal', system-ui, -apple-system, sans-serif;
+    box-sizing: border-box;
+}
+
+/* Card Wrapper (Trigger) */
+.role-switcher-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.85rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+    width: 100%;
+    position: relative;
+    backdrop-filter: blur(8px);
+}
+
+.role-switcher-card.is-clickable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.role-switcher-card.is-clickable:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(74, 222, 128, 0.3);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.role-switcher-card.is-open {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(74, 222, 128, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(74, 222, 128, 0.25);
+}
+
+.role-switcher-card:focus-visible {
+    outline: 2px solid #4ade80;
+    outline-offset: 2px;
+}
+
+/* Header Row: Avatar + Name */
+.role-card-user-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    width: 100%;
+}
+
+.role-card-avatar-box {
+    position: relative;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+}
+
+.role-card-avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.role-card-avatar-badge {
+    position: absolute;
+    bottom: -2px;
+    left: -2px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 3px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+    border: 2px solid var(--primary-green, #1b3617);
+    color: #ffffff;
+    font-size: 0.62rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.role-card-user-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.role-card-display-name {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.role-card-hint {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Active Role Bar / Pill Strip */
+.role-card-active-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.45rem 0.65rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+}
+
+.role-switcher-card:hover .role-card-active-strip.interactive {
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(74, 222, 128, 0.3);
+}
+
+.role-strip-role-info {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.role-strip-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4ade80;
+    flex-shrink: 0;
+}
+
+.role-strip-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.role-strip-action {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.role-strip-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.15);
+    padding: 2px 6px;
+    border-radius: 6px;
+    line-height: 1;
+}
+
+.role-strip-chevron {
+    color: rgba(255, 255, 255, 0.6);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.role-strip-chevron.is-rotated {
+    transform: rotate(180deg);
+    color: #4ade80;
+}
+
+/* ==========================================================================
+   Dropdown Menu Popup
+   ========================================================================== */
+
+.role-menu-popup {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    left: 0;
+    background: #0f2713;
+    background: linear-gradient(180deg, #133317 0%, #0c2010 100%);
+    border: 1px solid rgba(74, 222, 128, 0.25);
+    border-radius: 16px;
+    padding: 0.65rem;
+    box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    z-index: 9999;
+    direction: rtl;
+    animation: roleMenuPopupFade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    backdrop-filter: blur(16px);
+    box-sizing: border-box;
+}
+
+@keyframes roleMenuPopupFade {
+    from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.role-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.2rem 0.35rem 0.55rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 0.5rem;
+}
+
+.role-menu-header-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.role-menu-count-badge {
+    background: rgba(34, 197, 94, 0.15);
+    color: #86efac;
+    border: 1px solid rgba(74, 222, 128, 0.25);
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.role-menu-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.role-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0.55rem 0.65rem;
+    border-radius: 11px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+    text-align: right;
+    box-sizing: border-box;
+}
+
+.role-menu-item:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+
+.role-menu-item:focus-visible {
+    outline: 2px solid #4ade80;
+    outline-offset: 1px;
+}
+
+.role-menu-item:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.role-menu-item.is-selected {
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.2) 0%, rgba(21, 128, 61, 0.3) 100%);
+    border: 1px solid rgba(74, 222, 128, 0.4);
+    color: #ffffff;
+}
+
+.role-item-start {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.role-item-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.75);
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.role-menu-item:hover .role-item-icon-wrap {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+.role-menu-item.is-selected .role-item-icon-wrap {
+    background: rgba(34, 197, 94, 0.25);
+    color: #4ade80;
+}
+
+.role-item-text-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.role-item-name-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    line-height: 1.3;
+}
+
+.role-menu-item.is-selected .role-item-name-text {
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.role-item-active-subtext {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #86efac;
+    line-height: 1;
+}
+
+.role-item-end {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.role-check-bubble {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(34, 197, 94, 0.25);
+    border: 1px solid rgba(74, 222, 128, 0.5);
+    color: #4ade80;
+}
+
+.role-spin-indicator {
+    animation: roleSpinAnim 1s linear infinite;
+    color: #4ade80;
+}
+
+@keyframes roleSpinAnim {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

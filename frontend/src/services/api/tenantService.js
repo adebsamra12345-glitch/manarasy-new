@@ -51,6 +51,11 @@ export const rejectStudentDeletionRequest = async (requestId, payload = {}) => {
     return response.data;
 };
 
+export const bulkApproveStudentRequests = async (payload) => {
+    const response = await apiClient.post('/api/students-and-parents/students/requests/bulk-approve/', payload);
+    return response.data;
+};
+
 export const getStudents = async (params = {}) => {
     const cleanParams = Object.fromEntries(
         Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '' && v !== 'all')

@@ -15,6 +15,8 @@ import {
     saveMosqueBulkSchedule
 } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileAdminSessions from '../../mobile/tenantAdmin/MobileAdminSessions';
 
 const DAYS_OF_WEEK = [
     { id: 0, name: 'الأحد' },
@@ -36,6 +38,11 @@ const WEEKS_LIST = [
 const AdminSessions = () => {
     const navigate = useNavigate();
     const { user } = useAuthContext();
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAdminSessions />;
+    }
 
     // User display name & date header matching platform aesthetic
     const userStr = localStorage.getItem('user');

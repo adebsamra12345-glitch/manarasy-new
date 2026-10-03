@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { changePassword } from '../../services/api/userService';
 import { X, LockKey } from '@phosphor-icons/react';
 import './ChangePasswordModal.css';
@@ -10,6 +10,49 @@ const ChangePasswordModal = ({ isOpen, onClose }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+
+    const modalRef = useRef(null);
+    const initialInputRef = useRef(null);
+
+    // Escape key and Scroll lock
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+
+        if (isOpen) {
+            document.addEventListener('keydown', handleKeyDown);
+            document.body.style.overflow = 'hidden';
+            
+            // Focus first input
+            setTimeout(() => {
+                if (initialInputRef.current) {
+                    initialInputRef.current.focus();
+                }
+            }, 100);
+        } else {
+            document.body.style.overflow = 'unset';
+            // Reset state when closed
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            setError('');
+            setSuccess('');
+        }
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            document.body.style.overflow = 'unset';
+        };
+    }, [isOpen, onClose]);
+
+    const handleOverlayClick = (e) => {
+        if (modalRef.current && !modalRef.current.contains(e.target)) {
+            onClose();
+        }
+    };
 
     if (!isOpen) return null;
 
@@ -62,8 +105,8 @@ const ChangePasswordModal = ({ isOpen, onClose }) => {
     };
 
     return (
-        <div className="modal-overlay">
-            <div className="modal-content cp-modal">
+        <div className="modal-overlay" onClick={handleOverlayClick}>
+            <div className="modal-content cp-modal" ref={modalRef}>
                 <button className="modal-close" onClick={onClose}>
                     <X size={24} />
                 </button>
@@ -83,6 +126,7 @@ const ChangePasswordModal = ({ isOpen, onClose }) => {
                         <label>كلمة المرور الحالية</label>
                         <input
                             type="password"
+                            ref={initialInputRef}
                             value={currentPassword}
                             onChange={(e) => setCurrentPassword(e.target.value)}
                             placeholder="أدخل كلمة المرور الحالية"

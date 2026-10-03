@@ -189,6 +189,25 @@ def recitation_evaluate_view(request):
 
             msg = f"تم تسجيل تقييم الصفحة ({page_num}) بنجاح. الطالب متاح لتسميع الصفحة التالية ({next_page})."
 
+        # إرسال إشعار التقييم اليومي للطالب
+        try:
+            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+            target_st = student or Student.objects.using(db_name).filter(id=att.student_id).first()
+            if target_st:
+                behavior_label = att.get_behavior_display() if (att and hasattr(att, 'get_behavior_display')) else (att.behavior if att else f"{b_score}/10")
+                rec_type_label = rec.get_recitation_type_display() if hasattr(rec, 'get_recitation_type_display') else rec.recitation_type
+                StudentNotificationService.notify_daily_evaluation(
+                    db_name=db_name,
+                    student=target_st,
+                    memorization_grade=rec.grade,
+                    behavior_grade=f"{behavior_label} ({b_score}/10)",
+                    notes=notes,
+                    page_number=page_num,
+                    recitation_type=rec_type_label
+                )
+        except Exception as notify_err:
+            pass
+
         return JsonResponse({
             "status": "success",
             "message": msg,

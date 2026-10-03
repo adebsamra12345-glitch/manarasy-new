@@ -4,6 +4,8 @@ import { NavLink, useNavigate } from 'react-router-dom';
 
 import { useAuthContext } from '../../context/AuthContext';
 import { getRoleDisplayName, getRoleDefaultRoute } from '../../utils/roleUtils';
+import UserAvatar from '../common/UserAvatar';
+import BrandLogo from '../common/BrandLogo';
 
 export const MobileTopbar = () => {
     const { user, role, roles, logout, switchRole } = useAuthContext();
@@ -61,7 +63,7 @@ export const MobileTopbar = () => {
                 </div>
                 <div className="mobile-topbar-right" onClick={() => setShowMenu(prev => !prev)} style={{ cursor: 'pointer' }}>
                     <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary-green)' }}>مَنَارَة</h2>
-                    <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=133315&color=fff&rounded=true`} alt="شعار منارة" width="30" height="30" />
+                    <BrandLogo size={30} />
                 </div>
             </header>
 
@@ -80,7 +82,7 @@ export const MobileTopbar = () => {
                     }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid #f0f0f0', paddingBottom: '0.8rem' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
-                                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=133315&color=fff&rounded=true`} alt="User" width="40" height="40" style={{ borderRadius: '50%' }} />
+                                <UserAvatar name={displayName} size={40} background="#133315" />
                                 <div>
                                     <div style={{ fontWeight: '700', fontSize: '1rem', color: '#133315' }}>{displayName}</div>
                                     <div style={{ fontSize: '0.82rem', color: '#666', fontWeight: 500 }}>
@@ -218,11 +220,10 @@ export const MobileNavbar = () => {
         ];
     } else if (normalizedRole === 'parent' || normalizedRole === 'student') {
         items = [
-            { to: '/parent/dashboard', label: 'الرئيسية', icon: House },
-            { to: '/parent/report', label: 'المتابعة', icon: Books },
-            { to: '/parent/competitions', label: 'المسابقات', icon: CalendarBlank },
-            { to: '/parent/plan', label: 'الخطة', icon: Books },
-            { to: '/parent/notifications', label: 'الإشعارات', icon: Bell },
+            { to: '/student/dashboard', label: 'الرئيسية', icon: House },
+            { to: '/student/report', label: 'المتابعة', icon: Books },
+            { to: '/student/competitions', label: 'المسابقات', icon: CalendarBlank },
+            { to: '/student/notifications', label: 'الإشعارات', icon: Bell },
         ];
     } else if (normalizedRole === 'super_admin') {
         items = [

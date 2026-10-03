@@ -16,11 +16,14 @@ import {
 } from '../../../services/api/tenantService';
 import { getTeachers } from '../../../services/api/userService';
 import { useAuthContext } from '../../../context/AuthContext';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileHalqaManagement from '../../mobile/tenantAdmin/MobileHalqaManagement';
 
 /**
  * HalqaManagement (إدارة الحلقات القرآنية - الأدمن ومدير المركز)
  */
 const HalqaManagement = () => {
+    const { isMobile } = useDeviceType();
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
@@ -66,6 +69,10 @@ const HalqaManagement = () => {
         month: 'long', 
         day: 'numeric' 
     });
+
+    if (isMobile) {
+        return <MobileHalqaManagement />;
+    }
 
     useEffect(() => {
         fetchRings();

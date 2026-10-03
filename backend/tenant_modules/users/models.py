@@ -15,7 +15,6 @@ ROLE_CHOICES = [
     ('CENTER_MANAGER', 'Center Manager'),
     ('TEACHER', 'Teacher'),
     ('STUDENT', 'Student'),
-    ('PARENT', 'Parent'),
 ]
 
 class UserProfile(models.Model):
@@ -49,7 +48,6 @@ class UserProfile(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
-    parent_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='children_users')
 
     class Meta:
         db_table = 'user_profiles'

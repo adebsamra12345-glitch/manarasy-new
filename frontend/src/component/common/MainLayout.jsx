@@ -7,7 +7,7 @@ import TenantAdminSidebar from '../sideBar/TenantAdminSidebar';
 import CenterManagerSidebar from '../sideBar/CenterManagerSidebar';
 import SuperAdminSidebar from '../sideBar/SuperAdminSidebar';
 import TeacherSidebar from '../sideBar/TeacherSidebar';
-import ParentSidebar from '../sideBar/ParentSidebar';
+import StudentSidebar from '../sideBar/StudentSidebar';
 
 // Navbar
 import { MobileTopbar, MobileNavbar } from '../navbar/Navbar';
@@ -21,8 +21,8 @@ const ROLE_SIDEBAR_MAP = {
     tenant_admin: TenantAdminSidebar,
     center_manager: CenterManagerSidebar,
     teacher: TeacherSidebar,
-    parent: ParentSidebar,
-    student: ParentSidebar,
+    student: StudentSidebar,
+    parent: StudentSidebar,
 };
 
 const MainLayout = () => {

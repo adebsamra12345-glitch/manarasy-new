@@ -13,7 +13,6 @@ const ALL_ROLES = [
     { value: 'TEACHER', label: 'معلم', color: '#c05621', bg: '#fffaf0' },
     { value: 'CENTER_MANAGER', label: 'مدير مركز', color: '#276749', bg: '#f0fff4' },
     { value: 'TENANT_ADMIN', label: 'مدير نظام', color: '#6b46c1', bg: '#faf5ff' },
-    { value: 'PARENT', label: 'ولي أمر', color: '#9b2c2c', bg: '#fff5f5' },
 ];
 
 const ORPHAN_CHOICES = [

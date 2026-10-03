@@ -78,6 +78,18 @@ class PointsService:
                 performed_by=performed_by
             )
             
+            try:
+                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                StudentNotificationService.notify_points_awarded(
+                    db_name=db_name,
+                    student=student,
+                    amount=BONUS_AMOUNT,
+                    reason=reason.strip(),
+                    balance_after=balance_after
+                )
+            except Exception as notify_err:
+                logger.warning(f"Failed to notify points award: {notify_err}")
+
             return {
                 "success": True,
                 "student_id": str(student.id),
@@ -117,6 +129,18 @@ class PointsService:
                 balance_after=balance_after,
                 performed_by=performed_by
             )
+
+            try:
+                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                StudentNotificationService.notify_points_awarded(
+                    db_name=db_name,
+                    student=student,
+                    amount=RECITATION_BONUS,
+                    reason=reason or "مكافأة إتقان: تسميع 3 صفحات بتقييم عالي (+2 نقاط)",
+                    balance_after=balance_after
+                )
+            except Exception as notify_err:
+                logger.warning(f"Failed to notify recitation points: {notify_err}")
 
             return {
                 "success": True,
@@ -173,10 +197,14 @@ class PointsService:
 
         # إرسال إشعار للمسؤول المختص / الطالب
         try:
-            SystemNotification.objects.using(db_name).create(
-                center=student.halaqa.center if (student.halaqa and student.halaqa.center) else None,
-                title="طلب مكافأة جديد قيد الانتظار",
-                message=f"قام الطالب {student.full_name} بطلب المكافأة ({reward.name}) بقيمة {reward.points_cost} نقطة."
+            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+            StudentNotificationService.notify_points_redemption(
+                db_name=db_name,
+                student=student,
+                points_spent=reward.points_cost,
+                reward_name=reward.name,
+                balance_after=student.points,
+                is_approval=False
             )
         except Exception as notify_err:
             logger.warning(f"Failed to create claim notification: {notify_err}")
@@ -250,11 +278,14 @@ class PointsService:
 
             # إشعار الطالب / ولي الأمر
             try:
-                SystemNotification.objects.using(db_name).create(
-                    recipient=student.parent.user if (student.parent and hasattr(student.parent, 'user')) else None,
-                    center=student.halaqa.center if (student.halaqa and student.halaqa.center) else None,
-                    title="تمت الموافقة على طلب المكافأة",
-                    message=f"تمت الموافقة على طلب مكافأة ({reward.name}) للطالب {student.full_name}، وتم خصم {claim.points_spent} نقطة من الرصيد."
+                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                StudentNotificationService.notify_points_redemption(
+                    db_name=db_name,
+                    student=student,
+                    points_spent=claim.points_spent,
+                    reward_name=reward.name,
+                    balance_after=balance_after,
+                    is_approval=True
                 )
             except Exception as notify_err:
                 logger.warning(f"Notification error on approve: {notify_err}")
@@ -413,6 +444,19 @@ class PointsService:
                 processed_by=performed_by
             )
 
+            try:
+                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                StudentNotificationService.notify_points_redemption(
+                    db_name=db_name,
+                    student=student,
+                    points_spent=reward.points_cost,
+                    reward_name=reward.name,
+                    balance_after=balance_after,
+                    is_approval=True
+                )
+            except Exception as notify_err:
+                logger.warning(f"Notification error on direct redeem: {notify_err}")
+
             return {
                 "success": True,
                 "claim_id": str(claim.id),
@@ -450,4 +494,17 @@ class PointsService:
 
             participation.points_awarded = points
             participation.save(using=db_name, update_fields=['points_awarded'])
+
+            try:
+                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                StudentNotificationService.notify_points_awarded(
+                    db_name=db_name,
+                    student=student,
+                    amount=points,
+                    reason=reason or f"جائزة الفوز/الاجتياز في مسابقة: {participation.competition.title}",
+                    balance_after=balance_after
+                )
+            except Exception as notify_err:
+                logger.warning(f"Notification error on comp reward: {notify_err}")
+
             return tx

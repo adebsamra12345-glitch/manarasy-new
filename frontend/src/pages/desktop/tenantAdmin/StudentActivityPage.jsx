@@ -7,9 +7,17 @@ import {
     ArrowsClockwise, MagnifyingGlass, User
 } from '@phosphor-icons/react';
 import { getStudentActivityData, getAvailableMosqueMonths } from '../../../services/api/tenantService';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileStudentActivityPage from '../../mobile/tenantAdmin/MobileStudentActivityPage';
 import './studentActivityPage.css';
 
 const StudentActivityPage = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileStudentActivityPage />;
+    }
+
     const { studentId } = useParams();
     const navigate = useNavigate();
 

@@ -113,8 +113,8 @@ def check_halaqa_permission(request, db_name, center=None):
         if role == 'TENANT_ADMIN':
             return True
 
-        # المعلم وولي الأمر لا يملكان صلاحية الإضافة أو التعديل أو الحذف
-        if role in ['TEACHER', 'PARENT']:
+        # المعلم والطالب لا يملكان صلاحية الإضافة أو التعديل أو الحذف
+        if role in ['TEACHER', 'STUDENT']:
             return False
 
         if role != 'CENTER_MANAGER':

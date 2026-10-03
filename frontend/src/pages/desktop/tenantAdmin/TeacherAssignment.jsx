@@ -28,11 +28,18 @@ import {
 } from '@phosphor-icons/react';
 import { getTeachers, createUser, updateUser, deleteUser } from '../../../services/api/userService';
 import { getHalaqat, getMosqueAdminDashboardData } from '../../../services/api/tenantService';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileTeacherAssignment from '../../mobile/tenantAdmin/MobileTeacherAssignment';
 
 const TeacherAssignment = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileTeacherAssignment />;
+    }
 
     // Data States
     const [teachers, setTeachers] = useState([]);

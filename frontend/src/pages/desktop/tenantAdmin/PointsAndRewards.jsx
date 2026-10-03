@@ -24,9 +24,17 @@ import {
     deleteCompetition,
     addCompetitionQuestion
 } from '../../../services/pointsAndRewardsApi';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobilePointsAndRewards from '../../mobile/tenantAdmin/MobilePointsAndRewards';
 import './pointsAndRewards.css';
 
 const PointsAndRewards = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobilePointsAndRewards />;
+    }
+
     const navigate = useNavigate();
     const location = useLocation();
     

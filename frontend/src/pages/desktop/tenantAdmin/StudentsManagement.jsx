@@ -1,59 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
-    MagnifyingGlass,
-    PhoneCall,
-    Star,
-    CaretDown,
-    CaretLeft,
-    CaretRight,
-    Users,
-    Bell,
-    Plus,
-    PencilSimple,
-    Trash,
-    SquaresFour,
-    ListBullets,
-    CheckCircle,
-    XCircle,
-    MapPin,
-    Books,
-    GraduationCap,
-    ArrowsClockwise,
-    X,
-    Eye,
-    WhatsappLogo,
-    Heart,
-    Wheelchair,
-    ClockCounterClockwise,
-    UserPlus,
-    UserSwitch,
-    Check,
-    Prohibit,
-    WarningCircle
+    MagnifyingGlass, PhoneCall, Star, CaretDown, CaretLeft, CaretRight, Users, Bell, Plus, PencilSimple, Trash, SquaresFour, ListBullets, CheckCircle, XCircle, MapPin, Books, GraduationCap, ArrowsClockwise, X, Eye, WhatsappLogo, Heart, Wheelchair, ClockCounterClockwise, UserPlus, UserSwitch, Check, Prohibit, WarningCircle, Checks
 } from '@phosphor-icons/react';
 import {
-    getStudents,
-    createStudent,
-    updateStudent,
-    deleteStudent,
-    getHalaqat,
-    getProjects,
-    getProjectStages,
-    getMosqueAdminDashboardData,
-    getStudentRegistrationRequests,
-    getStudentDeletionRequests,
-    approveStudentRegistrationRequest,
-    rejectStudentRegistrationRequest,
-    approveStudentDeletionRequest,
-    rejectStudentDeletionRequest
+    getStudents, getStudentById, createStudent, updateStudent, deleteStudent, getHalaqat, getProjects, getProjectStages, getMosqueAdminDashboardData, getStudentRegistrationRequests, getStudentDeletionRequests, approveStudentRegistrationRequest, rejectStudentRegistrationRequest, approveStudentDeletionRequest, rejectStudentDeletionRequest, bulkApproveStudentRequests
 } from '../../../services/api/tenantService';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileStudentsManagement from '../../mobile/tenantAdmin/MobileStudentsManagement';
 
 const StudentsManagement = () => {
+    const { isMobile } = useDeviceType();
     const navigate = useNavigate();
+    const location = useLocation();
 
     // Navigation Tab (Main View: 'students' or 'requests')
     const [mainView, setMainView] = useState('students');
+    const [bulkConfirmModal, setBulkConfirmModal] = useState({ isOpen: false, type: '', label: '', count: 0 });
 
     // Data States
     const [students, setStudents] = useState([]);
@@ -142,10 +105,34 @@ const StudentsManagement = () => {
         day: 'numeric'
     });
 
+    if (isMobile) {
+        return <MobileStudentsManagement />;
+    }
+
     useEffect(() => {
         loadInitialData();
         fetchRequestsData();
     }, []);
+
+    // Deep-linking from Dashboard (Phase 5: Student Navigation)
+    useEffect(() => {
+        const targetStudentId = location.state?.targetStudentId;
+        if (targetStudentId) {
+            setMainView('students');
+            const found = students.find(s => String(s.id) === String(targetStudentId));
+            if (found) {
+                setSelectedStudentDetails(found);
+                setIsDetailsModalOpen(true);
+            } else {
+                getStudentById(targetStudentId).then(res => {
+                    if (res && res.data) {
+                        setSelectedStudentDetails(res.data);
+                        setIsDetailsModalOpen(true);
+                    }
+                }).catch(err => console.warn('Could not fetch student by id:', err));
+            }
+        }
+    }, [location.state, students]);
 
     const showToast = (msg) => {
         setToastMessage(msg);
@@ -520,6 +507,29 @@ const StudentsManagement = () => {
         } catch (err) {
             console.error('Error rejecting request:', err);
             showToast(err.response?.data?.message || 'حدث خطأ أثناء رفض الطلب');
+        } finally {
+            setActionProcessing(false);
+        }
+    };
+
+    // Bulk Approval Handler (Phase 7)
+    const handleConfirmBulkApprove = async () => {
+        if (!bulkConfirmModal.type) return;
+        setActionProcessing(true);
+        try {
+            const res = await bulkApproveStudentRequests({ request_type: bulkConfirmModal.type });
+            if (res.status === 'success') {
+                const countApproved = res.count !== undefined ? res.count : bulkConfirmModal.count;
+                showToast(`تمت الموافقة بنجاح على ${countApproved} من ${bulkConfirmModal.label}`);
+                setBulkConfirmModal({ isOpen: false, type: '', label: '', count: 0 });
+                fetchRequestsData();
+                loadInitialData(true);
+            } else {
+                showToast(res.message || 'فشلت عملية الموافقة الجماعية');
+            }
+        } catch (err) {
+            console.error('Error during bulk approval:', err);
+            showToast(err.response?.data?.message || 'حدث خطأ أثناء الموافقة الجماعية');
         } finally {
             setActionProcessing(false);
         }
@@ -1250,6 +1260,119 @@ const StudentsManagement = () => {
                             <p style={{ color: '#64748b', fontSize: '0.88rem', margin: 0 }}>
                                 استعراض طلبات المعلمين واتخاذ القرارات بالموافقة أو الرفض
                             </p>
+                        </div>
+                    </div>
+
+                    {/* Bulk Approval Actions Bar (Phase 7) */}
+                    <div style={{
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '14px',
+                        padding: '1rem 1.25rem',
+                        marginBottom: '1.25rem',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem'
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            <div style={{
+                                width: '38px', height: '38px', borderRadius: '10px',
+                                background: '#f0fdf4', color: '#16a34a',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            }}>
+                                <Checks size={22} weight="bold" />
+                            </div>
+                            <div>
+                                <h4 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: '#1e293b' }}>
+                                    إجراءات الموافقة الجماعية (Bulk Approval)
+                                </h4>
+                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                    اعتماد كافة الطلبات المعلقة لكل نوع دفعة واحدة مع تحديث السجلات آلياً وإشعار المعلمين
+                                </span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                            <button
+                                onClick={() => setBulkConfirmModal({
+                                    isOpen: true,
+                                    type: 'CREATE',
+                                    label: 'طلبات الإنشاء والتسجيل الجديد',
+                                    count: pendingAddCount
+                                })}
+                                disabled={pendingAddCount === 0 || actionProcessing}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.45rem',
+                                    padding: '0.55rem 1.15rem',
+                                    borderRadius: '10px',
+                                    border: '1px solid #bbf7d0',
+                                    background: pendingAddCount > 0 ? '#15803d' : '#f1f5f9',
+                                    color: pendingAddCount > 0 ? '#ffffff' : '#94a3b8',
+                                    fontWeight: 700,
+                                    fontSize: '0.84rem',
+                                    cursor: pendingAddCount > 0 && !actionProcessing ? 'pointer' : 'not-allowed',
+                                    transition: 'all 0.2s ease',
+                                    boxShadow: pendingAddCount > 0 ? '0 2px 6px rgba(21,128,61,0.2)' : 'none'
+                                }}
+                            >
+                                <Check size={16} weight="bold" />
+                                <span>الموافقة على جميع طلبات الإنشاء ({pendingAddCount})</span>
+                            </button>
+
+                            <button
+                                onClick={() => setBulkConfirmModal({
+                                    isOpen: true,
+                                    type: 'UPDATE',
+                                    label: 'طلبات تعديل البيانات',
+                                    count: pendingUpdateCount
+                                })}
+                                disabled={pendingUpdateCount === 0 || actionProcessing}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.45rem',
+                                    padding: '0.55rem 1.15rem',
+                                    borderRadius: '10px',
+                                    border: '1px solid #bfdbfe',
+                                    background: pendingUpdateCount > 0 ? '#1d4ed8' : '#f1f5f9',
+                                    color: pendingUpdateCount > 0 ? '#ffffff' : '#94a3b8',
+                                    fontWeight: 700,
+                                    fontSize: '0.84rem',
+                                    cursor: pendingUpdateCount > 0 && !actionProcessing ? 'pointer' : 'not-allowed',
+                                    transition: 'all 0.2s ease',
+                                    boxShadow: pendingUpdateCount > 0 ? '0 2px 6px rgba(29,78,216,0.2)' : 'none'
+                                }}
+                            >
+                                <Check size={16} weight="bold" />
+                                <span>الموافقة على جميع طلبات التعديل ({pendingUpdateCount})</span>
+                            </button>
+
+                            <button
+                                onClick={() => setBulkConfirmModal({
+                                    isOpen: true,
+                                    type: 'DELETE',
+                                    label: 'طلبات حذف الطلاب',
+                                    count: pendingDeleteCount
+                                })}
+                                disabled={pendingDeleteCount === 0 || actionProcessing}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.45rem',
+                                    padding: '0.55rem 1.15rem',
+                                    borderRadius: '10px',
+                                    border: '1px solid #fecaca',
+                                    background: pendingDeleteCount > 0 ? '#b91c1c' : '#f1f5f9',
+                                    color: pendingDeleteCount > 0 ? '#ffffff' : '#94a3b8',
+                                    fontWeight: 700,
+                                    fontSize: '0.84rem',
+                                    cursor: pendingDeleteCount > 0 && !actionProcessing ? 'pointer' : 'not-allowed',
+                                    transition: 'all 0.2s ease',
+                                    boxShadow: pendingDeleteCount > 0 ? '0 2px 6px rgba(185,28,28,0.2)' : 'none'
+                                }}
+                            >
+                                <Check size={16} weight="bold" />
+                                <span>الموافقة على جميع طلبات الحذف ({pendingDeleteCount})</span>
+                            </button>
                         </div>
                     </div>
 
@@ -2259,6 +2382,61 @@ const StudentsManagement = () => {
                                 style={{ background: '#c62828', border: 'none', borderRadius: '10px', padding: '0.6rem 1.5rem', color: '#fff', fontWeight: 700, fontSize: '0.88rem', cursor: actionProcessing ? 'not-allowed' : 'pointer' }}
                             >
                                 {actionProcessing ? 'جاري التنفيذ...' : 'تأكيد الرفض والإشعار'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* =========================================================================
+                BULK APPROVAL CONFIRMATION MODAL (Phase 7)
+            ========================================================================== */}
+            {bulkConfirmModal.isOpen && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 10000, direction: 'rtl', padding: '1rem'
+                }}>
+                    <div style={{
+                        background: '#ffffff', borderRadius: '20px', width: '100%', maxWidth: '480px',
+                        boxShadow: '0 20px 40px rgba(0,0,0,0.25)', padding: '1.85rem', textAlign: 'center'
+                    }}>
+                        <div style={{
+                            width: '56px', height: '56px', borderRadius: '50%',
+                            background: bulkConfirmModal.type === 'DELETE' ? '#fee2e2' : '#f0fdf4',
+                            color: bulkConfirmModal.type === 'DELETE' ? '#dc2626' : '#16a34a',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto'
+                        }}>
+                            <Checks size={32} weight="bold" />
+                        </div>
+                        <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', color: '#1e293b', fontWeight: 800 }}>
+                            تأكيد الموافقة الجماعية على {bulkConfirmModal.label}
+                        </h3>
+                        <p style={{ color: '#64748b', fontSize: '0.92rem', margin: '0 0 1.5rem 0', lineHeight: '1.6' }}>
+                            هل أنت متأكد من رغبتك في الموافقة الجماعية على جميع <strong>{bulkConfirmModal.label}</strong> المعلقة حالياً؟
+                            <br />
+                            سيتم اعتماد <strong style={{ color: '#15803d' }}>{bulkConfirmModal.count} طلب</strong> فورياً وتحديث سجلات الطلاب وإشعار المعلمين المعنيين.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                            <button
+                                onClick={() => setBulkConfirmModal({ isOpen: false, type: '', label: '', count: 0 })}
+                                disabled={actionProcessing}
+                                style={{ background: '#f1f5f9', border: 'none', borderRadius: '10px', padding: '0.65rem 1.4rem', color: '#475569', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                onClick={handleConfirmBulkApprove}
+                                disabled={actionProcessing}
+                                style={{
+                                    background: bulkConfirmModal.type === 'DELETE' ? '#dc2626' : '#16a34a',
+                                    border: 'none', borderRadius: '10px', padding: '0.65rem 1.75rem', color: '#fff',
+                                    fontWeight: 700, cursor: actionProcessing ? 'not-allowed' : 'pointer',
+                                    display: 'flex', alignItems: 'center', gap: '0.5rem'
+                                }}
+                            >
+                                <Check size={18} weight="bold" />
+                                <span>{actionProcessing ? 'جاري التنفيذ...' : 'نعم، موافقة جماعية'}</span>
                             </button>
                         </div>
                     </div>

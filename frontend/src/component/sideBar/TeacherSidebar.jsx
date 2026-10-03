@@ -2,6 +2,7 @@ import { House, CalendarBlank, Books, Users, SignOut, User } from '@phosphor-ico
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
 import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
+import BrandLogo from '../common/BrandLogo';
 
 const TeacherSidebar = () => {
     const { logout } = useAuthContext();
@@ -15,7 +16,7 @@ const TeacherSidebar = () => {
     return (
         <aside id="teacher-sidebar" className="sidebar-container hide-on-mobile">
             <div className="sidebar-logo">
-                <img src="https://ui-avatars.com/api/?name=م&background=133315&color=fff&rounded=true" alt="شعار منارة" />
+                <BrandLogo size={36} />
                 <span>مَنَارَة</span>
             </div>
 

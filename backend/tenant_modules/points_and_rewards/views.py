@@ -1,7 +1,8 @@
 import json
 import logging
 from decimal import Decimal
-from datetime import datetime, timedelta
+import math
+from datetime import datetime, date, timedelta
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
@@ -10,7 +11,7 @@ from django.db.models import Q, Sum, Avg, Count
 from django.db.models.functions import Coalesce
 
 from tenant_modules.users.models import UserProfile
-from tenant_modules.students_and_parents.models import Student
+from tenant_modules.students_and_parents.models import Student, EvaluationLog, StudentEnrollment
 from tenant_modules.halaqat.models import Halaqa
 from tenant_modules.centers_and_projects.models import Center, SystemNotification
 from tenant_modules.attendance.models import AttendanceLog, HalaqaSession
@@ -85,74 +86,34 @@ def parse_body(request):
 
 def resolve_student_for_user(db, profile, requested_student_id=None):
     """
-    استخراج سجل الطالب المناسب بناء على دور المستخدم:
-    - إذا كان ولي أمر (PARENT): جلب كافة أبنائه مع تحديد الابن النشط.
-    - إذا كان طالباً (STUDENT): جلب سجل الطالب المرتبط به مباشرة.
+    استخراج سجل الطالب المرتبط بالمستخدم مباشرة
     """
     children_list = []
     active_student = None
 
-    user_roles = [r.upper() for r in profile.get_roles()]
-    is_parent = 'PARENT' in user_roles or profile.role == 'PARENT'
-
-    if is_parent:
-        child_user_ids = UserProfile.objects.using(db).filter(
-            parent_user=profile.user, is_active=True
-        ).values_list('user_id', flat=True)
-
-        students_qs = Student.objects.using(db).filter(
-            Q(enrollments__user_profile__user_id__in=child_user_ids) |
-            Q(parent__phone=profile.phone) |
-            Q(parent__phone=profile.father_phone) |
-            Q(mother_phone=profile.phone) |
-            Q(mother_phone=profile.mother_phone) |
-            Q(national_id__in=[u.username for u in UserProfile.objects.using(db).filter(parent_user=profile.user)])
-        ).distinct().select_related('halaqa', 'halaqa__center', 'parent')
-
-        if not students_qs.exists() and profile.user.email:
-            students_qs = Student.objects.using(db).filter(parent__email=profile.user.email).distinct().select_related('halaqa', 'halaqa__center', 'parent')
-
-        for s in students_qs:
-            children_list.append({
-                'id': str(s.id),
-                'full_name': s.full_name,
-                'gender': s.gender,
-                'gender_display': 'ذكر' if s.gender == 'M' else 'أنثى',
-                'halaqa_id': str(s.halaqa.id) if s.halaqa else None,
-                'halaqa_name': s.halaqa.name if s.halaqa else 'غير محدد',
-                'center_name': s.halaqa.center.name if (s.halaqa and s.halaqa.center) else 'المركز الرئيسي',
-                'reached_page': s.reached_page or 1,
-                'points': s.points
-            })
-
-        if requested_student_id:
-            active_student = students_qs.filter(id=requested_student_id).first()
-        
-        if not active_student and students_qs.exists():
-            active_student = students_qs.first()
-
-    # إذا لم يكن ولي أمر أو لم نجد طلاباً كولي أمر، نبحث عنه كطالب
-    if not active_student:
+    student = getattr(profile.user, 'student_profile', None)
+    if not student:
         student = Student.objects.using(db).filter(
+            Q(user=profile.user) | 
             Q(national_id=profile.user.username) | 
             Q(enrollments__user_profile=profile)
-        ).select_related('halaqa', 'halaqa__center', 'parent').first()
+        ).select_related('halaqa', 'halaqa__center').first()
 
-        if student:
-            active_student = student
-            children_list = [{
-                'id': str(student.id),
-                'full_name': student.full_name,
-                'gender': student.gender,
-                'gender_display': 'ذكر' if student.gender == 'M' else 'أنثى',
-                'halaqa_id': str(student.halaqa.id) if student.halaqa else None,
-                'halaqa_name': student.halaqa.name if student.halaqa else 'غير محدد',
-                'center_name': student.halaqa.center.name if (student.halaqa and student.halaqa.center) else 'المركز الرئيسي',
-                'reached_page': student.reached_page or 1,
-                'points': student.points
-            }]
+    if student:
+        active_student = student
+        children_list = [{
+            'id': str(student.id),
+            'full_name': student.full_name,
+            'gender': student.gender,
+            'gender_display': 'ذكر' if student.gender == 'M' else 'أنثى',
+            'halaqa_id': str(student.halaqa.id) if student.halaqa else None,
+            'halaqa_name': student.halaqa.name if student.halaqa else 'غير محدد',
+            'center_name': student.halaqa.center.name if (student.halaqa and student.halaqa.center) else 'المركز الرئيسي',
+            'reached_page': student.reached_page or 1,
+            'points': student.points
+        }]
 
-    return active_student, children_list, is_parent
+    return active_student, children_list, False
 
 
 # ==========================================
@@ -869,7 +830,7 @@ def student_portal_dashboard_view(request):
 
     # المعلم وولي الأمر
     teacher_name = student.halaqa.teacher_name if (student.halaqa and student.halaqa.teacher_name) else "غير محدد"
-    parent_name = student.parent.full_name if student.parent else (f"{profile.father_name or ''} {profile.user.last_name or ''}".strip() or "ولي الأمر")
+    parent_name = getattr(student, 'father_name', '') or (f"{profile.father_name or ''} {profile.user.last_name or ''}".strip() if profile else "ولي الأمر") or "ولي الأمر"
 
     response_data = {
         'student_info': {
@@ -1403,6 +1364,12 @@ def student_start_competition_view(request, pk):
         status='IN_PROGRESS'
     )
 
+    try:
+        from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+        StudentNotificationService.notify_competition_registered(db, participation)
+    except Exception as notify_err:
+        logger.warning(f"Failed to notify competition registration: {notify_err}")
+
     questions = []
     for q in comp.questions.all().order_by('order', 'id'):
         questions.append({
@@ -1506,6 +1473,16 @@ def student_submit_competition_view(request, pk):
                     reason=f"جائزة الفوز بالمسابقة: {participation.competition.title}"
                 )
 
+        try:
+            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+            StudentNotificationService.notify_competition_result(
+                db_name=db,
+                participation=participation,
+                points_awarded=points_gained
+            )
+        except Exception as notify_err:
+            logger.warning(f"Failed to notify competition result: {notify_err}")
+
         return JsonResponse({
             'status': 'success',
             'message': 'تم تسليم المسابقة بنجاح',
@@ -1522,3 +1499,334 @@ def student_submit_competition_view(request, pk):
     except Exception as e:
         logger.error(f"Error submitting competition: {e}")
         return JsonResponse({'status': 'error', 'message': f'حدث خطأ أثناء التسليم: {str(e)}'}, status=500)
+
+
+# =========================================================
+# 8. سجل المتابعة والتقييمات التاريخي الشامل للطالب
+# =========================================================
+
+@csrf_exempt
+def student_portal_follow_up_view(request):
+    """
+    سجل المتابعة التاريخي الشامل للطالب
+    يعرض جميع نشاطات وتقييمات الطالب منذ تاريخ تسجيله وحتى اليوم:
+    - تقييمات الحفظ (جديد)
+    - تقييمات المراجعة (صغرى وكبرى)
+    - تقييمات السلوك والحضور
+    - التقييمات اليومية
+    - الامتحانات والأحداث التعليمية
+    مع دعم التصفية حسب التاريخ وحسب النوع والترقيم (Pagination)
+    """
+    if request.method != 'GET':
+        return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
+
+    db = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db)
+    if err:
+        return err
+
+    requested_student_id = request.GET.get('student_id')
+    student, children_list, is_parent = resolve_student_for_user(db, profile, requested_student_id)
+    if not student:
+        return JsonResponse({'status': 'error', 'message': 'لم يتم العثور على سجل الطالب'}, status=404)
+
+    date_from_str = request.GET.get('date_from', '').strip()
+    date_to_str = request.GET.get('date_to', '').strip()
+    type_filter = request.GET.get('type', 'ALL').strip().upper()
+    try:
+        page = max(1, int(request.GET.get('page', 1)))
+        page_size = max(1, min(100, int(request.GET.get('page_size', 15))))
+    except ValueError:
+        page = 1
+        page_size = 15
+
+    date_from = None
+    date_to = None
+    if date_from_str:
+        try:
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+    if date_to_str:
+        try:
+            date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+
+    records = []
+
+    # 1. Recitation Logs (حفظ جديد ومراجعة صغرى وكبرى)
+    rec_qs = RecitationLog.objects.using(db).filter(
+        student_id=student.id
+    ).select_related('evaluation_grade', 'attendance', 'attendance__session')
+    
+    if date_from:
+        rec_qs = rec_qs.filter(Q(attendance__session_date__gte=date_from) | Q(created_at__date__gte=date_from))
+    if date_to:
+        rec_qs = rec_qs.filter(Q(attendance__session_date__lte=date_to) | Q(created_at__date__lte=date_to))
+
+    for r in rec_qs:
+        rec_date = r.attendance.session_date if (r.attendance and r.attendance.session_date) else r.created_at.date()
+        is_memorization = (r.recitation_type == 'NEW_MEMORIZATION')
+        category = 'MEMORIZATION' if is_memorization else 'REVIEW'
+        type_label = 'حفظ جديد' if is_memorization else ('مراجعة صغرى' if r.recitation_type == 'MINOR_REVIEW' else 'مراجعة كبرى')
+        badge_color = r.evaluation_grade.color_code if (r.evaluation_grade and r.evaluation_grade.color_code) else ('#10b981' if not r.requires_repeat else '#ef4444')
+        teacher = student.halaqa.teacher_name if student.halaqa else "معلم الحلقة"
+        halaqa_title = student.halaqa.name if student.halaqa else "الحلقة القرآنية"
+
+        records.append({
+            'id': f"rec_{r.id}",
+            'raw_id': str(r.id),
+            'date': rec_date.strftime('%Y-%m-%d'),
+            'type': category,
+            'type_label': type_label,
+            'title': f"تسميع صفحة {r.page_number}",
+            'halaqa_name': halaqa_title,
+            'teacher_name': teacher,
+            'grade': r.grade,
+            'score': r.grade,
+            'requires_repeat': r.requires_repeat,
+            'badge_color': badge_color,
+            'behavior_score': r.behavior_score,
+            'notes': r.notes or "",
+            'timestamp': r.created_at or datetime.combine(rec_date, datetime.min.time())
+        })
+
+    # 2. Attendance & Behavior Logs (سجلات الحضور والسلوك)
+    att_qs = AttendanceLog.objects.using(db).filter(
+        student_id=student.id
+    ).select_related('session')
+    
+    if date_from:
+        att_qs = att_qs.filter(session_date__gte=date_from)
+    if date_to:
+        att_qs = att_qs.filter(session_date__lte=date_to)
+
+    for a in att_qs:
+        beh_score = a.behavior_score if a.behavior_score is not None else 10
+        beh_label = a.get_behavior_display() if hasattr(a, 'get_behavior_display') else (a.behavior or 'ممتاز')
+        att_status_label = a.get_status_display() if hasattr(a, 'get_status_display') else a.status
+        badge_color = '#10b981' if beh_score >= 8 else ('#f59e0b' if beh_score >= 6 else '#ef4444')
+        if a.status in ['ABSENT', 'EXCUSED']:
+            badge_color = '#ef4444'
+
+        records.append({
+            'id': f"att_{a.id}",
+            'raw_id': str(a.id),
+            'date': a.session_date.strftime('%Y-%m-%d'),
+            'type': 'BEHAVIOR',
+            'type_label': 'سلوك وحضور',
+            'title': f"جلسة ({att_status_label})",
+            'halaqa_name': student.halaqa.name if student.halaqa else "الحلقة القرآنية",
+            'teacher_name': student.halaqa.teacher_name if student.halaqa else "معلم الحلقة",
+            'grade': f"{beh_label} ({beh_score}/10)",
+            'score': f"{beh_score}/10",
+            'requires_repeat': False,
+            'badge_color': badge_color,
+            'behavior_score': beh_score,
+            'notes': a.notes or "",
+            'timestamp': datetime.combine(a.session_date, datetime.min.time())
+        })
+
+    # 3. Independent Daily Evaluations (التقييمات اليومية في EvaluationLog)
+    eval_qs = EvaluationLog.objects.using(db).filter(
+        student=student
+    ).select_related('teacher', 'halaqa')
+
+    if date_from:
+        eval_qs = eval_qs.filter(date__gte=date_from)
+    if date_to:
+        eval_qs = eval_qs.filter(date__lte=date_to)
+
+    for e in eval_qs:
+        eval_type_label = e.get_evaluation_type_display() if hasattr(e, 'get_evaluation_type_display') else e.evaluation_type
+        score_val = float(e.score)
+        badge_color = '#10b981' if score_val >= 80 else ('#f59e0b' if score_val >= 60 else '#ef4444')
+        t_name = (e.teacher.user.get_full_name() or e.teacher.user.username) if (e.teacher and e.teacher.user) else (student.halaqa.teacher_name if student.halaqa else "معلم الحلقة")
+
+        records.append({
+            'id': f"eval_{e.id}",
+            'raw_id': str(e.id),
+            'date': e.date.strftime('%Y-%m-%d'),
+            'type': 'DAILY',
+            'type_label': f"تقييم {eval_type_label}",
+            'title': f"تقييم دوري: {eval_type_label}",
+            'halaqa_name': e.halaqa.name if e.halaqa else (student.halaqa.name if student.halaqa else "الحلقة القرآنية"),
+            'teacher_name': t_name,
+            'grade': f"{e.score}%",
+            'score': f"{e.score}%",
+            'requires_repeat': False,
+            'badge_color': badge_color,
+            'behavior_score': None,
+            'notes': e.notes or "",
+            'timestamp': e.created_at or datetime.combine(e.date, datetime.min.time())
+        })
+
+    # 4. Educational Events & Exams (الامتحانات والأحداث التعليمية)
+    try:
+        from tenant_modules.centers_and_projects.models import StudentExamResult
+        exam_qs = StudentExamResult.objects.using(db).filter(
+            student=student
+        ).select_related('stage', 'exam_template')
+        if date_from:
+            exam_qs = exam_qs.filter(created_at__date__gte=date_from)
+        if date_to:
+            exam_qs = exam_qs.filter(created_at__date__lte=date_to)
+
+        for x in exam_qs:
+            status_label = x.get_status_display() if hasattr(x, 'get_status_display') else x.status
+            score_txt = f"{x.score}%" if x.score is not None else status_label
+            badge_color = '#10b981' if x.status == 'PASSED' else ('#ef4444' if x.status == 'FAILED' else '#6366f1')
+
+            records.append({
+                'id': f"exam_{x.id}",
+                'raw_id': str(x.id),
+                'date': x.created_at.date().strftime('%Y-%m-%d'),
+                'type': 'EXAM',
+                'type_label': 'اختبار مرحلي',
+                'title': f"امتحان: {x.stage.title if x.stage else 'اختبار إتقان'}",
+                'halaqa_name': student.halaqa.name if student.halaqa else "الحلقة القرآنية",
+                'teacher_name': student.halaqa.teacher_name if student.halaqa else "لجنة الاختبارات",
+                'grade': f"{status_label} ({score_txt})",
+                'score': score_txt,
+                'requires_repeat': (x.status == 'FAILED'),
+                'badge_color': badge_color,
+                'behavior_score': None,
+                'notes': x.notes or "",
+                'timestamp': x.created_at
+            })
+    except Exception:
+        pass
+
+    # الإحصائيات الشاملة قبل فلترة النوع
+    summary_stats = {
+        'total_records': len(records),
+        'total_memorization': sum(1 for r in records if r['type'] == 'MEMORIZATION'),
+        'total_review': sum(1 for r in records if r['type'] == 'REVIEW'),
+        'total_behavior': sum(1 for r in records if r['type'] == 'BEHAVIOR'),
+        'total_daily': sum(1 for r in records if r['type'] == 'DAILY'),
+        'total_exams': sum(1 for r in records if r['type'] == 'EXAM'),
+    }
+
+    # فلترة حسب النوع إن لم يكن ALL
+    if type_filter != 'ALL':
+        records = [r for r in records if r['type'] == type_filter]
+
+    # الترتيب من الأحدث إلى الأقدم
+    records.sort(key=lambda x: (x['date'], str(x.get('timestamp') or '')), reverse=True)
+
+    # الترقيم (Pagination)
+    total_items = len(records)
+    total_pages = max(1, math.ceil(total_items / page_size))
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_records = records[start_idx:end_idx]
+
+    # تنظيف حقل timestamp لمنع مشاكل serialization
+    for r in paginated_records:
+        if isinstance(r.get('timestamp'), (datetime, date)):
+            r['timestamp'] = r['timestamp'].isoformat()
+
+    return JsonResponse({
+        'status': 'success',
+        'data': {
+            'student_info': {
+                'id': str(student.id),
+                'full_name': student.full_name,
+                'halaqa_name': student.halaqa.name if student.halaqa else "غير محدد",
+                'teacher_name': student.halaqa.teacher_name if student.halaqa else "غير محدد",
+                'reached_page': student.reached_page or 1,
+                'points': student.points
+            },
+            'summary_stats': summary_stats,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_pages': total_pages,
+                'total_items': total_items,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            },
+            'records': paginated_records
+        }
+    }, status=200)
+
+
+@csrf_exempt
+def student_portal_notifications_view(request):
+    """
+    جلب قائمة إشعارات الطالب / ولي الأمر
+    مع العداد للإشعارات غير المقروءة
+    """
+    if request.method != 'GET':
+        return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
+
+    db = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db)
+    if err:
+        return err
+
+    from tenant_modules.centers_and_projects.models import SystemNotification
+    from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+
+    requested_student_id = request.GET.get('student_id')
+    student, _, _ = resolve_student_for_user(db, profile, requested_student_id)
+
+    recipient_user = profile.user
+    if student:
+        resolved_u = StudentNotificationService.resolve_student_recipient_user(db, student)
+        if resolved_u:
+            recipient_user = resolved_u
+
+    filter_q = Q(recipient=recipient_user)
+    if student and student.halaqa and student.halaqa.center:
+        filter_q |= Q(recipient__isnull=True, center=student.halaqa.center)
+
+    notifications_qs = SystemNotification.objects.using(db).filter(filter_q).order_by('-created_at')
+    
+    unread_count = notifications_qs.filter(is_read=False).count()
+    notifications = notifications_qs[:60]
+
+    data = []
+    for n in notifications:
+        data.append({
+            'id': str(n.id),
+            'title': n.title,
+            'message': n.message,
+            'is_read': n.is_read,
+            'created_at': n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else "",
+            'date': n.created_at.strftime('%Y-%m-%d') if n.created_at else ""
+        })
+
+    return JsonResponse({
+        'status': 'success',
+        'data': {
+            'unread_count': unread_count,
+            'notifications': data
+        }
+    }, status=200)
+
+
+@csrf_exempt
+def student_portal_mark_notification_read_view(request, pk=None):
+    """
+    تحديد إشعار أو جميع الإشعارات كمقروءة
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
+
+    db = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db)
+    if err:
+        return err
+
+    from tenant_modules.centers_and_projects.models import SystemNotification
+
+    if pk:
+        SystemNotification.objects.using(db).filter(id=pk).update(is_read=True)
+    else:
+        # تحديد الكل كمقروء
+        SystemNotification.objects.using(db).filter(recipient=profile.user, is_read=False).update(is_read=True)
+
+    return JsonResponse({'status': 'success', 'message': 'تم تحديث حالة الإشعارات بنجاح'}, status=200)
+

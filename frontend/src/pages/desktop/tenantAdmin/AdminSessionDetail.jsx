@@ -11,6 +11,8 @@ import RecitationModal from '../teacher/RecitationModal';
 import PageEvaluationsList from '../../../components/PageEvaluationsList';
 import { exportSessionPdf } from '../../../utils/sessionPdfExporter';
 import AlternativeDatePickerModal from '../../../components/AlternativeDatePickerModal';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileAdminSessionDetail from '../../mobile/tenantAdmin/MobileAdminSessionDetail';
 
 export const BEHAVIOR_OPTIONS = [
     { label: 'ممتاز (10)', value: 10, code: 'EXCELLENT' },
@@ -22,6 +24,12 @@ export const BEHAVIOR_OPTIONS = [
 ];
 
 const AdminSessionDetail = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAdminSessionDetail />;
+    }
+
     const { ringId, sessionId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();

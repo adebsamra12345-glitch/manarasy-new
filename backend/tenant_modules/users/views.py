@@ -11,7 +11,7 @@ from django.contrib.auth.hashers import make_password, check_password
 
 from core_system.tenants.models import Tenant
 from tenant_modules.centers_and_projects.models import Center
-from tenant_modules.students_and_parents.models import Student, Parent as StudentParentModel
+from tenant_modules.students_and_parents.models import Student as StudentParentModel
 from .models import UserProfile, AccountRequest
 
 User = get_user_model()
@@ -91,13 +91,11 @@ def serialize_profile(prof):
         "latitude": float(prof.latitude) if prof.latitude is not None else None,
         "longitude": float(prof.longitude) if prof.longitude is not None else None,
         "reached_page": prof.reached_page or 1,
-        "parent_user_id": str(prof.parent_user.id) if prof.parent_user else None,
-        "parent_user_name": f"{prof.parent_user.first_name} {prof.parent_user.last_name}".strip() if prof.parent_user else None,
         "enrollments": enrollments_data
     }
 
     # Retrieve all student specific fields if they exist
-    from tenant_modules.students_and_parents.models import Student, Parent as StudentParentModel
+    from tenant_modules.students_and_parents.models import Student as StudentParentModel
     if prof.role == 'STUDENT' or 'STUDENT' in prof.get_roles():
         try:
             # Try finding student via enrollments first
@@ -124,21 +122,6 @@ def serialize_profile(prof):
         except Exception as e:
             pass
             
-    if prof.role == 'PARENT' or 'PARENT' in prof.get_roles():
-        try:
-            full_name_lookup = f"{prof.user.first_name} {prof.user.last_name}".strip()
-            parent_obj = StudentParentModel.objects.using(db_name).filter(
-                phone=prof.phone or prof.father_phone or prof.mother_phone
-            ).first()
-            if not parent_obj:
-                parent_obj = StudentParentModel.objects.using(db_name).filter(full_name=full_name_lookup).first()
-                
-            if parent_obj:
-                data['parent_email'] = parent_obj.email
-                # We can add more parent fields if added to the model later
-        except Exception:
-            pass
-
     return data
 
 
@@ -146,31 +129,6 @@ def serialize_profile(prof):
 # Execution Helpers
 # ==============================================================================
 
-def check_existing_parent(db_name, guardian_name, guardian_last_name, guardian_type='FATHER'):
-    """
-    ط§ظ„ط¨ط­ط« ط¹ظ† ظˆظ„ظٹ ط£ظ…ط± ظ†ط´ط· ظٹظ…ظ„ظƒ ظ†ظپط³ (ط§ط³ظ… ط§ظ„ظˆظ„ظٹ ط§ظ„ظ…ط®طھط§ط± ظˆط§ط³ظ… ط§ظ„ط¹ط§ط¦ظ„ط©)
-    """
-    g_name = guardian_name.strip() if guardian_name else ''
-    l_name = guardian_last_name.strip() if guardian_last_name else ''
-    if not g_name:
-        return None
-
-    parent_profiles = UserProfile.objects.using(db_name).filter(
-        role='PARENT',
-        is_active=True
-    ).select_related('user')
-
-    for prof in parent_profiles:
-        u = prof.user
-        u_first = u.first_name.strip().lower()
-        u_last = u.last_name.strip().lower()
-        full_u = f"{u_first} {u_last}".strip()
-        full_req = f"{g_name} {l_name}".strip().lower()
-
-        if (u_first == g_name.lower() and u_last == l_name.lower()) or (full_u == full_req):
-            return u, prof
-
-    return None
 
 
 def execute_user_creation(db_name, data):
@@ -301,82 +259,21 @@ def execute_user_creation(db_name, data):
     profile.set_roles(roles)
     profile.save(using=db_name)
 
-    parent_profile = None
-
-    # ط§ظ„ط¥ظ†ط´ط§ط، ط§ظ„طھظ„ظ‚ط§ط¦ظٹ ط£ظˆ ط§ظ„ط±ط¨ط· ط¨ط­ط³ط§ط¨ ظˆظ„ظٹ ط§ظ„ط£ظ…ط± ط¹ظ†ط¯ ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ط·ط§ظ„ط¨
-    if role == 'STUDENT':
-        existing_parent_id = data.get('existing_parent_id')
-        parent_user = None
-
-        if existing_parent_id:
-            try:
-                parent_user = User.objects.using(db_name).get(id=existing_parent_id)
-                try:
-                    parent_profile = UserProfile.objects.using(db_name).get(user=parent_user)
-                except UserProfile.DoesNotExist:
-                    parent_profile = None
-            except User.DoesNotExist:
-                parent_user = None
-
-        # ط¥ظ†ط´ط§ط، ظˆظ„ظٹ ط£ظ…ط± ط¬ط¯ظٹط¯ ط¥ط°ط§ ظ„ظ… ظٹظڈط­ط¯ظ‘ط¯ ط­ط³ط§ط¨ ظˆظ„ظٹ ط£ظ…ط± ظ…ظˆط¬ظˆط¯
-        if not parent_user:
-            import random
-            target_g_name = mother_name if guardian_type == 'MOTHER' else father_name
-            target_g_last = (mother_last_name) if guardian_type == 'MOTHER' else last_name
-            g_prefix = "mother" if guardian_type == 'MOTHER' else "father"
-
-            base_parent_name = f"{target_g_name}_{target_g_last}".strip('_').replace(' ', '_') if target_g_name else f"{g_prefix}_{username}"
-            rand_num = random.randint(100, 999)
-            parent_username = f"{base_parent_name}_{rand_num}"
-
-            while User.objects.using(db_name).filter(username=parent_username).exists():
-                rand_num += 1
-                parent_username = f"{base_parent_name}_{rand_num}"
-
-            if guardian_type == 'MOTHER':
-                p_first_name = mother_name if mother_name else f"ط£ظ… {first_name}"
-                p_last_name = mother_last_name if mother_last_name else last_name
-                p_phone = mother_phone or phone
-            else:
-                p_first_name = father_name if father_name else f"ظˆظ„ظٹ ط£ظ…ط± {first_name}"
-                p_last_name = last_name
-                p_phone = father_phone or phone
-
-            parent_user = User.objects.using(db_name).create(
-                username=parent_username,
-                password=make_password(password),
-                first_name=p_first_name,
-                last_name=p_last_name,
-                email=email,
-                is_active=True
-            )
-
-            parent_profile = UserProfile.objects.using(db_name).create(
-                user=parent_user,
-                role='PARENT',
-                center=center,
-                phone=p_phone,
-                father_phone=father_phone,
-                mother_phone=mother_phone,
-                latitude=latitude,
-                longitude=longitude,
-                monthly_income=monthly_income,
-                is_active=True
-            )
-
-        profile.parent_user = parent_user
-        profile.save(using=db_name)
-
-        # طھط²ط§ظ…ظ† ط§ظ„ط³ط¬ظ„ ط£ظٹط¶ط§ظ‹ ظ…ط¹ ط¬ط¯ظˆظ„ظٹ Student ظˆ Parent ط¥ظ† ظˆظڈط¬ط¯ط§
+    # الربط والإنشاء التلقائي لملف الطالب عند توفر دور STUDENT
+    roles_list = profile.get_roles()
+    if 'STUDENT' in roles_list or role == 'STUDENT':
         try:
-            sp_parent, _ = StudentParentModel.objects.using(db_name).get_or_create(
-                phone=father_phone or phone or '00000000',
-                defaults={'full_name': parent_user.first_name, 'email': email}
-            )
-            st_obj = Student.objects.using(db_name).create(
-                full_name=f"{first_name} {last_name}".strip(),
-                parent=sp_parent,
-                reached_page=reached_page
+            st_obj, _ = StudentParentModel.objects.using(db_name).get_or_create(
+                user=user,
+                defaults={
+                    'full_name': f"{first_name} {last_name}".strip() or user.username,
+                    'father_name': father_name,
+                    'father_phone': father_phone,
+                    'mother_name': mother_name,
+                    'mother_phone': mother_phone,
+                    'reached_page': reached_page,
+                    'registration_number': f"STU-{user.id.hex[:6].upper()}"
+                }
             )
             
             halaqa_id = data.get('halaqa_id')
@@ -411,8 +308,7 @@ def execute_user_creation(db_name, data):
         except Exception:
             pass
 
-
-    return user, profile, parent_profile
+    return user, profile, None
 
 
 def execute_user_update(db_name, user, data):
@@ -587,7 +483,7 @@ def user_list_create_view(request):
     if request.method == 'GET':
         role_param = request.GET.get('role')
         if requester_role != 'TENANT_ADMIN' and role_param != 'TEACHER':
-            return JsonResponse({"status": "error", "message": "ط¹ط°ط±ط§ظ‹طŒ ط§ظ„ظˆطµظˆظ„ ظ„طµظپط­ط© ظˆط¥ط¬ط±ط§ط،ط§طھ ط¥ط¯ط§ط±ط© ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ† ظ…طھط§ط­ ظپظ‚ط· ظ„ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط±ط¦ظٹط³ظٹ"}, status=403)
+            return JsonResponse({"status": "error", "message": "عذراً، الوصول لصفحة وإجراءات إدارة المستخدمين متاح فقط لمدير النظام الرئيسي"}, status=403)
         try:
             center_id_param = request.GET.get('center_id')
             status_param = request.GET.get('status')
@@ -641,67 +537,19 @@ def user_list_create_view(request):
                 res.append(item)
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "ط®ط·ط£ ط¹ظ†ط¯ ط§ط³طھط±ط¬ط§ط¹ ظ‚ط§ط¦ظ…ط© ط§ظ„ط­ط³ط§ط¨ط§طھ", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "خطأ عند استرجاع قائمة الحسابات", "details": str(e)}, status=500)
 
     elif request.method == 'POST':
-        if requester_role != 'TENANT_ADMIN':
-            return JsonResponse({"status": "error", "message": "ط¹ط°ط±ط§ظ‹طŒ ط¥ط¶ط§ظپط© ط­ط³ط§ط¨ط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ† ظ…طھط§ط­ ظپظ‚ط· ظ„ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط±ط¦ظٹط³ظٹ"}, status=403)
+        if requester_role not in ['TENANT_ADMIN', 'CENTER_MANAGER', 'TEACHER']:
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الأدمن أو مدير المركز مطلوبة لإضافة الحسابات"}, status=403)
         try:
             data = parse_body(request)
             target_role = data.get('role', 'STUDENT')
-            father_name = data.get('father_name', '')
-            mother_name = data.get('mother_name', '')
-            mother_last_name = data.get('mother_last_name', '')
-            last_name = data.get('last_name', '')
-            existing_parent_id = data.get('existing_parent_id')
-            create_new_parent = data.get('create_new_parent', False)
-            raw_gt = str(data.get('guardian_type', 'FATHER')).upper().strip()
-            guardian_type = raw_gt if raw_gt in ['FATHER', 'MOTHER'] else 'FATHER'
 
-            guardian_name = mother_name if guardian_type == 'MOTHER' else father_name
-            guardian_last_name = (mother_last_name if mother_last_name else last_name) if guardian_type == 'MOTHER' else last_name
-            guardian_title = "ط§ظ„ط£ظ…" if guardian_type == 'MOTHER' else "ط§ظ„ط£ط¨"
-
-            # ظ…ظ†ط¹ ط§ط®طھظٹط§ط± ط§ظ„ط£ظ… ظƒظˆظ„ظٹ ط£ظ…ط± ط¥ظ„ط§ ط¹ظ†ط¯ ط£ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ط£ظ… ظˆظƒظ†ظٹطھظ‡ط§
-            if target_role == 'STUDENT' and guardian_type == 'MOTHER':
-                if not mother_name.strip() or not mother_last_name.strip():
-                    return JsonResponse({
-                        "status": "error",
-                        "message": "ط¹ط°ط±ط§ظ‹طŒ ظ„ط§ ظٹظ…ظƒظ† ط§ط®طھظٹط§ط± ط§ظ„ط£ظ… ظƒظˆظ„ظٹ ط£ظ…ط± ط¥ظ„ط§ ظپظٹ ط­ط§ظ„ ط¥ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ط£ظ… ظˆظƒظ†ظٹطھظ‡ط§"
-                    }, status=400)
-
-            # ط§ظ„طھط­ظ‚ظ‚ ظ…ظ† ظˆط¬ظˆط¯ ظˆظ„ظٹ ط£ظ…ط± ظ…ط·ط§ط¨ظ‚ ط¹ظ†ط¯ ط¥ظ†ط´ط§ط، ط·ط§ظ„ط¨ ط¥ط°ط§ ظ„ظ… ظٹطھظ… طھط£ظƒظٹط¯ ط§ظ„ط§ط®طھظٹط§ط±
-            if target_role == 'STUDENT' and not existing_parent_id and not create_new_parent:
-                existing_p = check_existing_parent(db_name, guardian_name, guardian_last_name, guardian_type)
-                if existing_p:
-                    ex_user, ex_prof = existing_p
-                    return JsonResponse({
-                        "status": "warning_parent_exists",
-                        "message": f"طھظ†ط¨ظٹظ‡: ظٹظˆط¬ط¯ ظˆظ„ظٹ ط£ظ…ط± ظ…ط³ط¬ظ„ ط¨ط§ظ„ظپط¹ظ„ ط¨ط§ط³ظ… '{ex_user.first_name} {ex_user.last_name}' (ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…: {ex_user.username}). ظ‡ظ„ طھط±ط؛ط¨ ظپظٹ ط±ط¨ط· ظ‡ط°ط§ ط§ظ„ط·ط§ظ„ط¨ ط¨ط§ظ„ط­ط³ط§ط¨ ط§ظ„ط­ط§ظ„ظٹ ظƒظ€ ({guardian_title}) ط£ظ… ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ظˆظ„ظٹ ط£ظ…ط± ط¬ط¯ظٹط¯طں",
-                        "requires_parent_confirmation": True,
-                        "guardian_type": guardian_type,
-                        "existing_parent": {
-                            "id": str(ex_user.id),
-                            "username": ex_user.username,
-                            "full_name": f"{ex_user.first_name} {ex_user.last_name}".strip(),
-                            "phone": ex_prof.phone or ex_prof.father_phone or ex_prof.mother_phone or ""
-                        }
-                    }, status=400)
-
-            # 1. ط§ظ„ظ…ط¹ظ„ظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ظپظ‚ط· ط¯ظˆظ† ط§ظ„طھظ†ظپظٹط° ط§ظ„ظپط¹ظ„ظٹ
+            # 1. المعلم تقديم طلب فقط دون التنفيذ الفعلي
             if requester_role == 'TEACHER':
                 if target_role != 'STUDENT':
-                    return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ„ظ…ط¹ظ„ظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ظ„ط؛ظٹط± ط­ط³ط§ط¨ط§طھ ط§ظ„ط·ظ„ط§ط¨"}, status=403)
-
-                # ط¥ط¶ط§ظپط© ظ…ظ„ط§ط­ط¸ط© ط§ظ„طھظ†ط¨ظٹظ‡ ظپظٹ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط·ظ„ط¨ ظ„ظ„ط¸ظ‡ظˆط± ظ„ظ„ط£ط¯ظ…ظ† ظˆظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط²
-                if existing_parent_id:
-                    try:
-                        ex_u = User.objects.using(db_name).get(id=existing_parent_id)
-                        data['parent_note'] = f"ظ…ظ„ط§ط­ط¸ط© ط§ظ„ظ…ط¹ظ„ظ…: ظ‚ط§ظ… ط§ظ„ظ…ط¹ظ„ظ… ط¨ط§ط®طھظٹط§ط± ط±ط¨ط· ط§ظ„ط·ط§ظ„ط¨ ط¨ظˆظ„ظٹ ط§ظ„ط£ظ…ط± ط§ظ„ط­ط§ظ„ظٹ '{ex_u.first_name} {ex_u.last_name}' ({ex_u.username}) ظƒظ€ ({guardian_title})."
-                    except Exception:
-                        pass
-                elif create_new_parent:
-                    data['parent_note'] = f"ظ…ظ„ط§ط­ط¸ط© ط§ظ„ظ…ط¹ظ„ظ…: ط§ط®طھط§ط± ط§ظ„ظ…ط¹ظ„ظ… ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ظˆظ„ظٹ ط£ظ…ط± ط¬ط¯ظٹط¯ ({guardian_title}) ط±ط؛ظ… ظˆط¬ظˆط¯ ط­ط³ط§ط¨ ط¢ط®ط± ط¨ظ†ظپط³ ط§ظ„ط§ط³ظ…."
+                    return JsonResponse({"status": "error", "message": "لا يحق للمعلم تقديم طلب لغير حسابات الطلاب"}, status=403)
 
                 center = requester_profile.center if requester_profile else None
                 account_req = AccountRequest.objects.using(db_name).create(
@@ -714,43 +562,34 @@ def user_list_create_view(request):
 
                 return JsonResponse({
                     "status": "pending_approval",
-                    "message": "طھظ… طھظ‚ط¯ظٹظ… ط·ظ„ط¨ ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ ط§ظ„ط·ط§ظ„ط¨ ط¨ظ†ط¬ط§ط­طŒ ط¨ط§ظ†طھط¸ط§ط± ظ…ظˆط§ظپظ‚ط© ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط£ظˆ ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ",
+                    "message": "تم تقديم طلب إنشاء حساب الطالب بنجاح، بانتظار موافقة مدير المركز أو الأدمن الرئيسي",
                     "request_id": str(account_req.id)
                 }, status=202)
 
-            # 2. ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظٹظ…ظ†ط¹ ظ…ظ† ط¥ظ†ط´ط§ط، ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ظ…ط±ظƒط² ط¢ط®ط±
+            # 2. مدير المركز يمنع من إنشاء أدمن أو مدير مركز آخر
             if requester_role == 'CENTER_MANAGER':
                 if target_role in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-                    return JsonResponse({"status": "error", "message": "ظ„ط§ ظٹط­ظ‚ ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ط§طھ ط£ط¯ظ…ظ† ط±ط¦ظٹط³ظٹ ط£ظˆ ظ…ط¯ط±ط§ط، ظ…ط±ط§ظƒط² ط¢ط®ط±ظٹظ†"}, status=403)
+                    return JsonResponse({"status": "error", "message": "لا يحق لمدير المركز إنشاء حسابات أدمن رئيسي أو مدراء مراكز آخرين"}, status=403)
                 
                 if requester_profile and requester_profile.center:
                     data['center_id'] = str(requester_profile.center.id)
 
-            # 3. ط§ظ„ط£ط¯ظ…ظ† ط§ظ„ط±ط¦ظٹط³ظٹ ظٹظ…ظ„ظƒ ظƒط§ظ…ظ„ ط§ظ„طµظ„ط§ط­ظٹط©
-            if requester_role not in ['TENANT_ADMIN', 'CENTER_MANAGER']:
-                return JsonResponse({"status": "error", "message": "طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظ…ظ† ط£ظˆ ظ…ط¯ظٹط± ط§ظ„ظ…ط±ظƒط² ظ…ط·ظ„ظˆط¨ط© ظ„ط¥ظ†ط´ط§ط، ط­ط³ط§ط¨ط§طھ"}, status=403)
-
-            user, profile, parent_profile = execute_user_creation(db_name, data)
+            # 3. الأدمن الرئيسي ومدير المركز يملكان صلاحية الإنشاء
+            user, profile, _ = execute_user_creation(db_name, data)
 
             resp_data = {
                 "id": str(user.id),
                 "username": user.username,
                 "role": profile.role,
+                "roles": profile.get_roles(),
                 "center_name": profile.center.name if profile.center else None,
                 "created_at": user.date_joined.isoformat()
             }
             resp_data.update(serialize_profile(profile))
 
-            if parent_profile:
-                resp_data["parent_account"] = {
-                    "id": str(parent_profile.user.id),
-                    "username": parent_profile.user.username,
-                    "role": parent_profile.role
-                }
-
             return JsonResponse({
                 "status": "success",
-                "message": "طھظ… ط¥ظ†ط´ط§ط، ط§ظ„ط­ط³ط§ط¨ ط¨ظ†ط¬ط§ط­",
+                "message": "تم إنشاء الحساب بنجاح",
                 "data": resp_data
             }, status=201)
 

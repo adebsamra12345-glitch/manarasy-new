@@ -9,7 +9,6 @@ const ROLE_DEFAULT_ROUTE = {
     tenant_admin: '/admin/dashboard',
     teacher: '/teacher/dashboard',
     TEACHER: '/teacher/dashboard',
-    parent: '/parent/dashboard',
 };
 
 /**

@@ -85,7 +85,6 @@ const UsersManagement = () => {
             case 'CENTER_MANAGER': return 'مدير مركز';
             case 'TEACHER': return 'معلم';
             case 'STUDENT': return 'طالب';
-            case 'PARENT': return 'ولي أمر';
             default: return role;
         }
     };
@@ -100,8 +99,6 @@ const UsersManagement = () => {
                 return { background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' };
             case 'STUDENT':
                 return { background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' };
-            case 'PARENT':
-                return { background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe' };
             default:
                 return { background: '#edf2f7', color: '#4a5568', border: '1px solid #cbd5e0' };
         }

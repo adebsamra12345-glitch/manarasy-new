@@ -552,7 +552,7 @@ def check_project_permission(request, db_name, is_global=False, center_ids=None,
         if role == 'TENANT_ADMIN':
             return True
 
-        if role in ['TEACHER', 'PARENT']:
+        if role in ['TEACHER', 'STUDENT']:
             return False
 
         if role != 'CENTER_MANAGER':
@@ -651,9 +651,39 @@ def serialize_project(project):
     }
 
 
-def validate_and_get_exam_template(db_name, has_exam, exam_template_id):
+def get_or_create_exam_template_for_rubric(db_name, rubric=None, eval_template=None):
     """
-    التحقق من صحة اختيار نموذج الامتحان عند تفعيل الامتحان للمرحلة أو المشروع
+    توليد أو استرجاع نموذج امتحان تلقائياً بناءً على سلم الاختبار (TestRubric)
+    أو نموذج التقييم (EvaluationTemplate) لضمان ربط المرحلة بنموذج امتحان معتمد.
+    """
+    scale_title = None
+    desc = ""
+    if rubric:
+        scale_title = rubric.title.strip()
+        desc = f"نموذج امتحان مولد تلقائياً من سلم الاختبار ({scale_title})"
+    elif eval_template:
+        scale_title = eval_template.title.strip()
+        desc = f"نموذج امتحان مولد تلقائياً من سلم التقييم ({scale_title})"
+
+    if not scale_title:
+        return None
+
+    tmpl_title = f"اختبار سلم {scale_title}"
+    tmpl = ExamTemplate.objects.using(db_name).filter(title=tmpl_title, is_active=True).first()
+    if not tmpl:
+        tmpl = ExamTemplate.objects.using(db_name).create(
+            title=tmpl_title,
+            description=desc,
+            pass_score=50.00,
+            total_score=100.00,
+            is_active=True
+        )
+    return tmpl
+
+
+def validate_and_get_exam_template(db_name, has_exam, exam_template_id, project=None, rubric=None):
+    """
+    التحقق من صحة اختيار نموذج الامتحان مع التوليد التلقائي من سلم الاختبار إذا وجد
     """
     if not has_exam and not exam_template_id:
         return None, None
@@ -666,16 +696,24 @@ def validate_and_get_exam_template(db_name, has_exam, exam_template_id):
             return None, "عذراً، نموذج الامتحان المحدد غير موجود في المنصة. يرجى اختيار نموذج امتحان موجود."
 
     if has_exam and not exam_template_id:
-        any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
-        if not any_exists:
-            return None, "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
-        else:
-            return None, "عذراً، يجب اختيار وتحديد نموذج امتحان موجود في المنصة عند تفعيل امتحان المرحلة."
+        active_rubric = rubric or (project.test_rubric if project else None)
+        active_eval = project.evaluation_template if project else None
+
+        if active_rubric or active_eval:
+            auto_tmpl = get_or_create_exam_template_for_rubric(db_name, rubric=active_rubric, eval_template=active_eval)
+            if auto_tmpl:
+                return auto_tmpl, None
+
+        any_tmpl = ExamTemplate.objects.using(db_name).filter(is_active=True).first()
+        if any_tmpl:
+            return any_tmpl, None
+
+        return None, "عذراً، لا يوجد أي نموذج امتحان أو سلم اختبار مضاف في المنصة بعد. يرجى اختيار سلم اختبار للمشروع أو إضافة نموذج امتحان أولاً."
 
     return None, None
 
 
-def create_stages_and_parts_for_project(db_name, project, stages_data):
+def create_stages_and_parts_for_project(db_name, project, stages_data, default_exam_template=None):
     """إنشاء المراكز والأجزاء المتسلسلة والمرافقة للمشروع"""
     for s_idx, st_data in enumerate(stages_data, 1):
         st_title = st_data.get('title', f"المرحلة {s_idx}").strip()
@@ -684,9 +722,13 @@ def create_stages_and_parts_for_project(db_name, project, stages_data):
         has_exam = st_data.get('has_exam', False) or project.require_exam_for_all_stages
         exam_template_id = st_data.get('exam_template_id')
         
-        exam_template, err_msg = validate_and_get_exam_template(db_name, has_exam, exam_template_id)
-        if err_msg:
-            raise ValueError(err_msg)
+        exam_template = default_exam_template
+        if not exam_template or exam_template_id:
+            exam_template, err_msg = validate_and_get_exam_template(
+                db_name, has_exam, exam_template_id, project=project, rubric=project.test_rubric
+            )
+            if err_msg:
+                raise ValueError(err_msg)
 
         stage = ProjectStage.objects.using(db_name).create(
             project=project,
@@ -825,14 +867,6 @@ def project_list_create_view(request):
             except EvaluationTemplate.DoesNotExist:
                 return JsonResponse({"status": "error", "message": "نموذج التقييم المحدد غير موجود أو غير نشط"}, status=404)
 
-            if require_exam_for_all_stages:
-                any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
-                if not any_exists:
-                    return JsonResponse({
-                        "status": "error",
-                        "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
-                    }, status=400)
-
             test_rubric_id = data.get('test_rubric_id')
             test_rubric = None
             if test_rubric_id:
@@ -840,6 +874,20 @@ def project_list_create_view(request):
                     test_rubric = TestRubric.objects.using(db_name).get(id=test_rubric_id, is_active=True)
                 except TestRubric.DoesNotExist:
                     return JsonResponse({"status": "error", "message": "سلم الاختبار المحدد غير موجود أو غير نشط"}, status=404)
+
+            auto_exam_template = None
+            if require_exam_for_all_stages:
+                if test_rubric or eval_template:
+                    auto_exam_template = get_or_create_exam_template_for_rubric(
+                        db_name, rubric=test_rubric, eval_template=eval_template
+                    )
+                if not auto_exam_template:
+                    any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
+                    if not any_exists:
+                        return JsonResponse({
+                            "status": "error",
+                            "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
+                        }, status=400)
 
             project = Project.objects.using(db_name).create(
                 title=clean_title,
@@ -857,7 +905,9 @@ def project_list_create_view(request):
 
             if stages_data:
                 try:
-                    create_stages_and_parts_for_project(db_name, project, stages_data)
+                    create_stages_and_parts_for_project(
+                        db_name, project, stages_data, default_exam_template=auto_exam_template
+                    )
                 except ValueError as ve:
                     project.delete(using=db_name)
                     return JsonResponse({"status": "error", "message": str(ve)}, status=400)
@@ -904,23 +954,6 @@ def project_detail_view(request, pk):
             project.description = data.get('description', project.description)
             project.project_type = data.get('project_type', project.project_type)
             project.is_global = is_global
-            if 'require_exam_for_all_stages' in data:
-                req_exam = data['require_exam_for_all_stages']
-                if req_exam:
-                    any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
-                    if not any_exists:
-                        return JsonResponse({
-                            "status": "error",
-                            "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
-                        }, status=400)
-                    for st in project.stages.all():
-                        if not st.exam_template:
-                            return JsonResponse({
-                                "status": "error",
-                                "message": "عذراً، يجب اختيار وتحديد نموذج امتحان موجود في المنصة عند تفعيل امتحان المرحلة."
-                            }, status=400)
-                project.require_exam_for_all_stages = req_exam
-
             if 'evaluation_template_id' in data:
                 eval_tmpl_id = data['evaluation_template_id']
                 if not eval_tmpl_id:
@@ -929,7 +962,6 @@ def project_detail_view(request, pk):
                     project.evaluation_template = EvaluationTemplate.objects.using(db_name).get(id=eval_tmpl_id, is_active=True)
                 except EvaluationTemplate.DoesNotExist:
                     return JsonResponse({"status": "error", "message": "نموذج التقييم المحدد غير موجود أو غير نشط"}, status=404)
-
 
             if 'test_rubric_id' in data:
                 tr_id = data['test_rubric_id']
@@ -940,6 +972,40 @@ def project_detail_view(request, pk):
                         return JsonResponse({"status": "error", "message": "سلم الاختبار المحدد غير موجود أو غير نشط"}, status=404)
                 else:
                     project.test_rubric = None
+
+            if 'require_exam_for_all_stages' in data:
+                req_exam = data['require_exam_for_all_stages']
+                if req_exam:
+                    auto_tmpl = None
+                    if project.test_rubric or project.evaluation_template:
+                        auto_tmpl = get_or_create_exam_template_for_rubric(
+                            db_name, rubric=project.test_rubric, eval_template=project.evaluation_template
+                        )
+                    if not auto_tmpl:
+                        any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
+                        if not any_exists:
+                            return JsonResponse({
+                                "status": "error",
+                                "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
+                            }, status=400)
+                    for st in project.stages.all():
+                        if not st.exam_template:
+                            if auto_tmpl:
+                                st.exam_template = auto_tmpl
+                                st.has_exam = True
+                                st.save(using=db_name)
+                            else:
+                                any_tmpl = ExamTemplate.objects.using(db_name).filter(is_active=True).first()
+                                if any_tmpl:
+                                    st.exam_template = any_tmpl
+                                    st.has_exam = True
+                                    st.save(using=db_name)
+                                else:
+                                    return JsonResponse({
+                                        "status": "error",
+                                        "message": "عذراً، يجب اختيار وتحديد نموذج امتحان موجود في المنصة عند تفعيل امتحان المرحلة."
+                                    }, status=400)
+                project.require_exam_for_all_stages = req_exam
 
             project.save(using=db_name)
             
@@ -1010,7 +1076,9 @@ def stage_list_create_view(request, project_id):
             has_exam = data.get('has_exam', False) or project.require_exam_for_all_stages
             exam_template_id = data.get('exam_template_id')
             
-            exam_template, err_msg = validate_and_get_exam_template(db_name, has_exam, exam_template_id)
+            exam_template, err_msg = validate_and_get_exam_template(
+                db_name, has_exam, exam_template_id, project=project, rubric=project.test_rubric
+            )
             if err_msg:
                 return JsonResponse({"status": "error", "message": err_msg}, status=400)
 
@@ -1087,7 +1155,9 @@ def stage_detail_view(request, stage_id):
             else:
                 exam_template_id = str(stage.exam_template.id) if stage.exam_template else None
 
-            exam_template, err_msg = validate_and_get_exam_template(db_name, has_exam, exam_template_id)
+            exam_template, err_msg = validate_and_get_exam_template(
+                db_name, has_exam, exam_template_id, project=stage.project, rubric=stage.project.test_rubric
+            )
             if err_msg:
                 return JsonResponse({"status": "error", "message": err_msg}, status=400)
 

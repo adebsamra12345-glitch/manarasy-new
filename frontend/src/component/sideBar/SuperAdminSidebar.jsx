@@ -2,6 +2,7 @@ import { House, Buildings, CreditCard, Heartbeat, SignOut, User } from '@phospho
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
 import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
+import BrandLogo from '../common/BrandLogo';
 
 const SuperAdminSidebar = () => {
     const { logout } = useAuthContext();
@@ -15,7 +16,7 @@ const SuperAdminSidebar = () => {
     return (
         <aside id="super-admin-sidebar" className="sidebar-container hide-on-mobile">
             <div className="sidebar-logo">
-                <img src="https://ui-avatars.com/api/?name=م&background=133315&color=fff&rounded=true" alt="شعار منارة" />
+                <BrandLogo size={36} />
                 <span>مَنَارَة</span>
             </div>
 

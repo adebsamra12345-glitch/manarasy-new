@@ -17,7 +17,7 @@ from django.utils import timezone
 from core_system.tenants.models import Tenant
 from tenant_modules.centers_and_projects.models import Center, Project, StudentExamResult, ProjectStage
 from tenant_modules.halaqat.models import Halaqa
-from tenant_modules.students_and_parents.models import Student, StudentEnrollment, Parent
+from tenant_modules.students_and_parents.models import Student, StudentEnrollment
 from tenant_modules.attendance.models import HalaqaSession, AttendanceLog
 from tenant_modules.recitation_and_sabr.models import RecitationLog
 

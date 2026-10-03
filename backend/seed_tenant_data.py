@@ -18,7 +18,7 @@ from tenant_modules.centers_and_projects.models import (
 from tenant_modules.users.models import UserProfile
 from tenant_modules.halaqat.models import Halaqa
 from tenant_modules.students_and_parents.models import (
-    Parent, Student, StudentEnrollment, StudentRegistrationRequest
+    Student, StudentEnrollment, StudentRegistrationRequest
 )
 from tenant_modules.attendance.models import HalaqaSession, AttendanceLog
 from tenant_modules.recitation_and_sabr.models import RecitationLog
@@ -176,18 +176,14 @@ def seed():
     ]
 
     all_students = []
-    parent_obj, _ = Parent.objects.using(db_name).get_or_create(
-        full_name="ولي أمر افتراضي",
-        defaults={"phone": "0501234567"}
-    )
-
     for i, name in enumerate(male_names):
         h = halaqat[i % len(halaqat)]
         std, _ = Student.objects.using(db_name).get_or_create(
             full_name=name,
             defaults={
                 "gender": "M",
-                "parent": parent_obj,
+                "father_name": "ولي أمر افتراضي",
+                "father_phone": "0501234567",
                 "halaqa": h,
                 "registration_number": f"M-{100 + i}",
                 "birth_date": date(2012, 1 + (i % 12), 15),

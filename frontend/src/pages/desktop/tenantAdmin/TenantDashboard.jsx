@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
     Bell, Users, User, CaretDown, Medal, BookOpen, Clock,
-    Warning, MagnifyingGlass, MapPin, Check, X
+    Warning, MagnifyingGlass, MapPin, Check, X,
+    Eye, ArrowSquareOut, Checks, UserPlus, UserSwitch, Trash,
+    Funnel, Calendar, ArrowsClockwise, Info, FileText, CheckCircle, XCircle
 } from '@phosphor-icons/react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
@@ -10,11 +12,16 @@ import {
 } from 'recharts';
 import {
     getMosqueAdminDashboardData,
-    approveRegistrationRequest,
-    rejectRegistrationRequest
+    approveStudentRegistrationRequest,
+    rejectStudentRegistrationRequest,
+    approveStudentDeletionRequest,
+    rejectStudentDeletionRequest
 } from '../../../services/api/tenantService';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileTenantDashboard from '../../mobile/tenantAdmin/MobileTenantDashboard';
 
 const TenantDashboard = () => {
+    const { isMobile } = useDeviceType();
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
@@ -35,64 +42,255 @@ const TenantDashboard = () => {
     const [selectedCenterId, setSelectedCenterId] = useState('all');
     const [centersList, setCentersList] = useState([{ id: 'all', name: 'جميع المراكز' }]);
     const [searchQuery, setSearchQuery] = useState('');
-    const [pendingRequests, setPendingRequests] = useState([]);
     const [toastMessage, setToastMessage] = useState('');
 
-    useEffect(() => {
-        const fetchData = async () => {
-            if (data) {
-                setIsRefreshing(true);
-            }
-            try {
-                const res = await getMosqueAdminDashboardData(selectedCenterId);
-                if (res && res.data) {
-                    setData(res.data);
+    // Requests Management State (Phases 3, 4, 5, 6)
+    const [requests, setRequests] = useState([]);
+    const [selectedTypeFilter, setSelectedTypeFilter] = useState('ALL'); // 'ALL' | 'CREATE' | 'UPDATE' | 'DELETE'
+    const [selectedStatusFilter, setSelectedStatusFilter] = useState('ALL'); // 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'
+    const [tableSearch, setTableSearch] = useState('');
+    const [selectedRequestForDetails, setSelectedRequestForDetails] = useState(null);
+    const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const [requestToReject, setRequestToReject] = useState(null);
+    const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+    const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+    const [actionLoading, setActionLoading] = useState(false);
 
-                    // Update centers list only if we haven't loaded it properly yet, or to keep it fresh
-                    if (res.data.centers && res.data.centers.length > 0) {
-                        setCentersList([{ id: 'all', name: 'جميع المراكز' }, ...res.data.centers]);
-                    }
+    if (isMobile) {
+        return <MobileTenantDashboard />;
+    }
 
-                    if (res.data.pending_requests !== undefined) {
-                        setPendingRequests(res.data.pending_requests);
-                    }
-                }
-            } catch (err) {
-                console.warn('Error fetching dashboard data:', err);
-                showToast('حدث خطأ أثناء تحميل البيانات');
-            } finally {
-                setLoading(false);
-                setIsRefreshing(false);
-            }
-        };
-        fetchData();
-    }, [selectedCenterId]);
-
-    const handleAcceptRequest = async (id, name) => {
+    const fetchData = async (showRefresh = false) => {
+        if (showRefresh) {
+            setIsRefreshing(true);
+        }
         try {
-            await approveRegistrationRequest(id);
-            setPendingRequests(prev => prev.filter(r => r.id !== id));
-            showToast(`تمت الموافقة على طلب تسجيل ${name}`);
-        } catch (error) {
-            showToast(`حدث خطأ أثناء الموافقة على طلب ${name}`);
-            console.error(error);
+            const res = await getMosqueAdminDashboardData(selectedCenterId);
+            if (res && res.data) {
+                setData(res.data);
+
+                if (res.data.centers && res.data.centers.length > 0) {
+                    setCentersList([{ id: 'all', name: 'جميع المراكز' }, ...res.data.centers]);
+                }
+
+                if (res.data.requests) {
+                    setRequests(res.data.requests);
+                } else if (res.data.pending_requests) {
+                    // Fallback formatting
+                    setRequests(res.data.pending_requests.map(r => ({
+                        id: r.id,
+                        category: 'REGISTRATION',
+                        request_type: 'CREATE',
+                        request_type_label: 'إنشاء طالب',
+                        student_id: null,
+                        student_name: r.name,
+                        halaqa: r.halaqa || '',
+                        created_at: r.created_at || '',
+                        created_date: r.created_at || '',
+                        submitting_teacher: 'معلم الحلقة',
+                        status: 'PENDING',
+                        status_label: 'قيد الانتظار',
+                        rejection_reason: '',
+                        reviewed_by_name: '',
+                        notes: '',
+                        details: { full_name: r.name, reached_page: 1 }
+                    })));
+                }
+            }
+        } catch (err) {
+            console.warn('Error fetching dashboard data:', err);
+            showToast('حدث خطأ أثناء تحميل البيانات');
+        } finally {
+            setLoading(false);
+            setIsRefreshing(false);
         }
     };
 
-    const handleRejectRequest = async (id, name) => {
+    useEffect(() => {
+        fetchData(Boolean(data));
+    }, [selectedCenterId]);
+
+    const handleApproveRequest = async (req) => {
         try {
-            await rejectRegistrationRequest(id);
-            setPendingRequests(prev => prev.filter(r => r.id !== id));
-            showToast(`تم رفض طلب تسجيل ${name}`);
+            setActionLoading(true);
+            let res;
+            if (req.category === 'DELETION' || req.request_type === 'DELETE') {
+                res = await approveStudentDeletionRequest(req.id);
+            } else {
+                res = await approveStudentRegistrationRequest(req.id);
+            }
+
+            // Immediately update the status in local state
+            setRequests(prev => prev.map(r => r.id === req.id ? {
+                ...r,
+                status: 'APPROVED',
+                status_label: 'مقبول',
+                student_id: res?.data?.student_id || r.student_id
+            } : r));
+            showToast(res?.message || `تمت الموافقة بنجاح على طلب ${req.student_name}`);
+
+            // Refresh dashboard data in background
+            fetchData(false);
         } catch (error) {
-            showToast(`حدث خطأ أثناء رفض طلب ${name}`);
-            console.error(error);
+            console.error('Error approving request:', error);
+            showToast(error.response?.data?.message || 'حدث خطأ أثناء الموافقة على الطلب');
+        } finally {
+            setActionLoading(false);
         }
+    };
+
+    const handleOpenRejectModal = (req) => {
+        setRequestToReject(req);
+        setRejectionReasonInput('');
+        setIsRejectModalOpen(true);
+    };
+
+    const handleConfirmRejectRequest = async () => {
+        if (!requestToReject) return;
+        try {
+            setActionLoading(true);
+            let res;
+            const payload = { rejection_reason: rejectionReasonInput.trim() };
+            if (requestToReject.category === 'DELETION' || requestToReject.request_type === 'DELETE') {
+                res = await rejectStudentDeletionRequest(requestToReject.id, payload);
+            } else {
+                res = await rejectStudentRegistrationRequest(requestToReject.id, payload);
+            }
+
+            // Immediately update the status in local state
+            setRequests(prev => prev.map(r => r.id === requestToReject.id ? {
+                ...r,
+                status: 'REJECTED',
+                status_label: 'مرفوض',
+                rejection_reason: rejectionReasonInput.trim()
+            } : r));
+            showToast(res?.message || `تم رفض طلب ${requestToReject.student_name}`);
+            setIsRejectModalOpen(false);
+            setRequestToReject(null);
+            setRejectionReasonInput('');
+
+            // Refresh dashboard data in background
+            fetchData(false);
+        } catch (error) {
+            console.error('Error rejecting request:', error);
+            showToast(error.response?.data?.message || 'حدث خطأ أثناء رفض الطلب');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleNavigateToStudent = (req) => {
+        const studentId = req.student_id;
+        if (!studentId) {
+            showToast('طلب تسجيل جديد: لم يتم إنشاء ملف الطالب بعد');
+            return;
+        }
+        navigate(`${basePath}/students`, { state: { targetStudentId: studentId } });
+    };
+
+    const handleViewDetails = (req) => {
+        setSelectedRequestForDetails(req);
+        setIsDetailsModalOpen(true);
     };
 
     const showToast = (msg) => {
         setToastMessage(msg);
-        setTimeout(() => setToastMessage(''), 3500);
+        setTimeout(() => setToastMessage(''), 4000);
+    };
+
+    const filteredRequests = useMemo(() => {
+        return requests.filter(req => {
+            if (selectedTypeFilter !== 'ALL' && req.request_type !== selectedTypeFilter) {
+                return false;
+            }
+            if (selectedStatusFilter !== 'ALL' && req.status !== selectedStatusFilter) {
+                return false;
+            }
+            if (tableSearch.trim()) {
+                const q = tableSearch.toLowerCase().trim();
+                const sName = (req.student_name || '').toLowerCase();
+                const tName = (req.submitting_teacher || '').toLowerCase();
+                const rId = String(req.id || '');
+                if (!sName.includes(q) && !tName.includes(q) && !rId.includes(q)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }, [requests, selectedTypeFilter, selectedStatusFilter, tableSearch]);
+
+    const getRequestTypeBadge = (type) => {
+        switch (type) {
+            case 'CREATE':
+                return {
+                    label: 'إنشاء طالب',
+                    bg: '#ecfdf5',
+                    color: '#065f46',
+                    border: '#a7f3d0',
+                    icon: <UserPlus size={14} weight="bold" />
+                };
+            case 'UPDATE':
+                return {
+                    label: 'تعديل طالب',
+                    bg: '#eff6ff',
+                    color: '#1e40af',
+                    border: '#bfdbfe',
+                    icon: <UserSwitch size={14} weight="bold" />
+                };
+            case 'DELETE':
+                return {
+                    label: 'حذف طالب',
+                    bg: '#fef2f2',
+                    color: '#991b1b',
+                    border: '#fecaca',
+                    icon: <Trash size={14} weight="bold" />
+                };
+            default:
+                return {
+                    label: type || 'طلب',
+                    bg: '#f8fafc',
+                    color: '#475569',
+                    border: '#e2e8f0',
+                    icon: <FileText size={14} weight="bold" />
+                };
+        }
+    };
+
+    const getStatusBadge = (status) => {
+        switch (status) {
+            case 'PENDING':
+                return {
+                    label: 'قيد الانتظار',
+                    bg: '#fffbeb',
+                    color: '#b45309',
+                    border: '#fde68a',
+                    icon: <Clock size={13} weight="bold" />
+                };
+            case 'APPROVED':
+                return {
+                    label: 'مقبول',
+                    bg: '#f0fdf4',
+                    color: '#15803d',
+                    border: '#bbf7d0',
+                    icon: <CheckCircle size={13} weight="fill" />
+                };
+            case 'REJECTED':
+                return {
+                    label: 'مرفوض',
+                    bg: '#fef2f2',
+                    color: '#b91c1c',
+                    border: '#fecaca',
+                    icon: <XCircle size={13} weight="fill" />
+                };
+            default:
+                return {
+                    label: status || 'معلق',
+                    bg: '#f1f5f9',
+                    color: '#475569',
+                    border: '#cbd5e1',
+                    icon: <Clock size={13} />
+                };
+        }
     };
 
     // Default numbers matching design
@@ -291,14 +489,27 @@ const TenantDashboard = () => {
 
 
                 {/* Card 2: جلسات الشهر الحالي */}
-                <div style={{
-                    background: '#ffffff',
-                    border: '1px solid #edf2f7',
-                    borderRadius: '16px',
-                    padding: '1.25rem 1.4rem',
-                    textAlign: 'center',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
-                }}>
+                <div 
+                    onClick={() => navigate(`${basePath}/sessions`)}
+                    style={{
+                        background: '#ffffff',
+                        border: '1px solid #edf2f7',
+                        borderRadius: '16px',
+                        padding: '1.25rem 1.4rem',
+                        textAlign: 'center',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-3px)';
+                        e.currentTarget.style.boxShadow = '0 6px 15px rgba(0,0,0,0.06)';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: '36px', marginBottom: '0.5rem' }}>
                         <div style={{
                             background: '#fff7ed',
@@ -325,14 +536,27 @@ const TenantDashboard = () => {
                 </div>
 
                 {/* Card 3: الحلقات */}
-                <div style={{
-                    background: '#ffffff',
-                    border: '1px solid #edf2f7',
-                    borderRadius: '16px',
-                    padding: '1.25rem 1.4rem',
-                    textAlign: 'center',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
-                }}>
+                <div 
+                    onClick={() => navigate(`${basePath}/rings`)}
+                    style={{
+                        background: '#ffffff',
+                        border: '1px solid #edf2f7',
+                        borderRadius: '16px',
+                        padding: '1.25rem 1.4rem',
+                        textAlign: 'center',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-3px)';
+                        e.currentTarget.style.boxShadow = '0 6px 15px rgba(0,0,0,0.06)';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'flex-start', minHeight: '36px', marginBottom: '0.5rem' }}>
                         <div style={{
                             background: '#f0fdf4',
@@ -651,157 +875,1084 @@ const TenantDashboard = () => {
                 </div>
             </div>
 
-            {/* Bottom Section: Urgent Notifications & Actions */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1.2fr 1fr',
-                gap: '1.5rem',
-                alignItems: 'start',
-                paddingBottom: '2.5rem'
-            }}>
-                {/* Right Column: Pending Registrations */}
-                <div>
-                    <h3 style={{
-                        fontSize: '1.15rem',
-                        fontWeight: 800,
-                        color: '#133315',
-                        margin: '0 0 1rem 0'
-                    }}>
-                        الإشعارات والإجراءات العاجلة
-                    </h3>
-
+            {/* Teacher Attendance Alert Banner */}
+            <div style={{ marginBottom: '2rem' }}>
+                <div style={{
+                    background: '#fffbf5',
+                    border: '1.5px solid #fed7aa',
+                    borderRadius: '16px',
+                    padding: '1.25rem 1.5rem',
+                    display: 'flex',
+                    gap: '1.25rem',
+                    alignItems: 'center',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                }}>
                     <div style={{
-                        background: '#ffffff',
-                        border: '1px solid #edf2f7',
-                        borderRadius: '16px',
-                        padding: '1.5rem',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
-                    }}>
-                        <h4 style={{
-                            fontSize: '0.95rem',
-                            fontWeight: 700,
-                            color: '#2d3748',
-                            margin: '0 0 1.25rem 0'
-                        }}>
-                            طلبات تسجيل معلقة ({pendingRequests.length})
-                        </h4>
-
-                        {pendingRequests.length === 0 ? (
-                            <p style={{ color: '#a0aec0', fontSize: '0.9rem', textAlign: 'center', padding: '1rem 0' }}>
-                                لا توجد طلبات معلقة حالياً
-                            </p>
-                        ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                {pendingRequests.map((req, idx) => (
-                                    <div
-                                        key={req.id || idx}
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            paddingBottom: idx !== pendingRequests.length - 1 ? '1rem' : '0',
-                                            borderBottom: idx !== pendingRequests.length - 1 ? '1px solid #f1f5f9' : 'none'
-                                        }}
-                                    >
-                                        <div>
-                                            <h5 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#133315', margin: '0 0 0.25rem 0' }}>
-                                                {req.name}
-                                            </h5>
-                                            <p style={{ fontSize: '0.82rem', color: '#718096', margin: 0 }}>
-                                                {req.level || 'مستوى الحفظ'}
-                                            </p>
-                                        </div>
-
-                                        <div style={{ display: 'flex', gap: '0.65rem' }}>
-                                            <button
-                                                onClick={() => handleRejectRequest(req.id, req.name)}
-                                                style={{
-                                                    background: '#fee2e2',
-                                                    color: '#dc2626',
-                                                    border: 'none',
-                                                    padding: '0.45rem 1.4rem',
-                                                    borderRadius: '8px',
-                                                    fontSize: '0.85rem',
-                                                    fontWeight: 700,
-                                                    cursor: 'pointer',
-                                                    fontFamily: 'inherit',
-                                                    transition: 'opacity 0.2s'
-                                                }}
-                                            >
-                                                رفض
-                                            </button>
-                                            <button
-                                                onClick={() => handleAcceptRequest(req.id, req.name)}
-                                                style={{
-                                                    background: '#558b2f',
-                                                    color: '#ffffff',
-                                                    border: 'none',
-                                                    padding: '0.45rem 1.4rem',
-                                                    borderRadius: '8px',
-                                                    fontSize: '0.85rem',
-                                                    fontWeight: 700,
-                                                    cursor: 'pointer',
-                                                    fontFamily: 'inherit',
-                                                    transition: 'opacity 0.2s'
-                                                }}
-                                            >
-                                                موافقة
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Left Column: Teacher Attendance Alert Card */}
-                <div style={{ paddingTop: '2.15rem' }}>
-                    <div style={{
-                        background: '#fffbf5',
-                        border: '1.5px solid #fed7aa',
-                        borderRadius: '16px',
-                        padding: '1.5rem',
+                        background: '#ffedd5',
+                        color: '#ea580c',
+                        width: '46px',
+                        height: '46px',
+                        borderRadius: '12px',
                         display: 'flex',
-                        gap: '1.1rem',
-                        alignItems: 'flex-start',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
                     }}>
-                        <div style={{
-                            background: '#ffedd5',
-                            color: '#ea580c',
-                            width: '44px',
-                            height: '44px',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0
-                        }}>
-                            <Warning size={26} weight="fill" />
-                        </div>
-                        <div>
+                        <Warning size={28} weight="fill" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
                             <h5 style={{
-                                fontSize: '1.02rem',
+                                fontSize: '1.05rem',
                                 fontWeight: 800,
-                                color: '#ea580c',
-                                margin: '0 0 0.5rem 0'
+                                color: '#c2410c',
+                                margin: 0
                             }}>
                                 تنبيه متابعة حضور المعلمين
                             </h5>
-                            <p style={{
-                                color: '#4a5568',
-                                fontSize: '0.92rem',
-                                lineHeight: 1.6,
-                                margin: 0,
-                                fontWeight: 500
+                            <span style={{
+                                background: '#fed7aa',
+                                color: '#9a3412',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                padding: '0.15rem 0.6rem',
+                                borderRadius: '999px'
                             }}>
-                                {data?.teacher_attendance_alert?.message || "المعلم أحمد الراشد لم يسجل حضوراً منذ 5 أيام لمجموعته (حلقة عاصم بن أبي النجود)."}
-                            </p>
+                                إشعار عاجل
+                            </span>
+                        </div>
+                        <p style={{
+                            color: '#4a5568',
+                            fontSize: '0.92rem',
+                            lineHeight: 1.5,
+                            margin: 0,
+                            fontWeight: 500
+                        }}>
+                            {data?.teacher_attendance_alert?.message || "المعلم أحمد الراشد لم يسجل حضوراً منذ 5 أيام لمجموعته (حلقة عاصم بن أبي النجود)."}
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => navigate(`${basePath}/teachers`)}
+                        style={{
+                            background: '#ea580c',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '10px',
+                            padding: '0.55rem 1.25rem',
+                            fontSize: '0.88rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            flexShrink: 0,
+                            transition: 'background 0.2s ease'
+                        }}
+                    >
+                        <span>متابعة المعلمين</span>
+                        <ArrowSquareOut size={16} weight="bold" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Phase 3: Requests Management Professional Section */}
+            <div style={{
+                background: '#ffffff',
+                border: '1px solid #edf2f7',
+                borderRadius: '18px',
+                padding: '1.75rem',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+                marginBottom: '2.5rem'
+            }}>
+                {/* Section Header */}
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '1rem',
+                    marginBottom: '1.5rem',
+                    paddingBottom: '1.25rem',
+                    borderBottom: '1px solid #f1f5f9'
+                }}>
+                    <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <h3 style={{
+                                fontSize: '1.3rem',
+                                fontWeight: 800,
+                                color: '#133315',
+                                margin: 0
+                            }}>
+                                إدارة طلبات الطلاب والعمليات
+                            </h3>
+                            <span style={{
+                                background: '#f0fdf4',
+                                color: '#15803d',
+                                border: '1px solid #bbf7d0',
+                                fontSize: '0.85rem',
+                                fontWeight: 800,
+                                padding: '0.2rem 0.75rem',
+                                borderRadius: '999px'
+                            }}>
+                                {filteredRequests.length} طلب
+                            </span>
+                        </div>
+                        <p style={{ color: '#718096', fontSize: '0.88rem', margin: '0.35rem 0 0 0' }}>
+                            مراجعة واعتماد طلبات التسجيل، تعديل البيانات، والحذف المقدمة من المعلمين
+                        </p>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <button
+                            onClick={() => fetchData(true)}
+                            title="تحديث الطلبات"
+                            style={{
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '10px',
+                                padding: '0.55rem 0.85rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                cursor: 'pointer',
+                                color: '#475569',
+                                fontSize: '0.85rem',
+                                fontWeight: 600
+                            }}
+                        >
+                            <ArrowsClockwise size={16} weight="bold" />
+                            <span>تحديث</span>
+                        </button>
+                        <button
+                            onClick={() => navigate(`${basePath}/students`)}
+                            style={{
+                                background: '#133315',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '10px',
+                                padding: '0.55rem 1.25rem',
+                                fontSize: '0.88rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem'
+                            }}
+                        >
+                            <span>سجل الطلاب والطلبات</span>
+                            <ArrowSquareOut size={16} weight="bold" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Filters and Search Bar */}
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '1rem',
+                    marginBottom: '1.5rem',
+                    background: '#f8fafc',
+                    padding: '0.85rem 1.15rem',
+                    borderRadius: '14px',
+                    border: '1px solid #e2e8f0'
+                }}>
+                    {/* Request Type Pills */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#64748b', marginLeft: '0.35rem' }}>
+                            نوع الطلب:
+                        </span>
+                        {[
+                            { key: 'ALL', label: 'الكل' },
+                            { key: 'CREATE', label: 'إنشاء طالب', icon: <UserPlus size={14} /> },
+                            { key: 'UPDATE', label: 'تعديل طالب', icon: <UserSwitch size={14} /> },
+                            { key: 'DELETE', label: 'حذف طالب', icon: <Trash size={14} /> },
+                        ].map(tab => {
+                            const isActive = selectedTypeFilter === tab.key;
+                            return (
+                                <button
+                                    key={tab.key}
+                                    onClick={() => setSelectedTypeFilter(tab.key)}
+                                    style={{
+                                        border: isActive ? '1px solid #133315' : '1px solid #e2e8f0',
+                                        background: isActive ? '#133315' : '#ffffff',
+                                        color: isActive ? '#ffffff' : '#475569',
+                                        padding: '0.4rem 0.85rem',
+                                        borderRadius: '8px',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.35rem',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    {tab.icon}
+                                    <span>{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Status Dropdown and Search Input */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                        {/* Status Filter */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#64748b' }}>
+                                الحالة:
+                            </span>
+                            <select
+                                value={selectedStatusFilter}
+                                onChange={(e) => setSelectedStatusFilter(e.target.value)}
+                                style={{
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    padding: '0.42rem 0.85rem',
+                                    background: '#ffffff',
+                                    color: '#334155',
+                                    fontSize: '0.85rem',
+                                    fontWeight: 600,
+                                    outline: 'none',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <option value="ALL">جميع الحالات</option>
+                                <option value="PENDING">معلق (قيد الانتظار)</option>
+                                <option value="APPROVED">مقبول</option>
+                                <option value="REJECTED">مرفوض</option>
+                            </select>
+                        </div>
+
+                        {/* Search Input */}
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            background: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            padding: '0.42rem 0.85rem',
+                            minWidth: '220px'
+                        }}>
+                            <MagnifyingGlass size={16} color="#94a3b8" />
+                            <input
+                                type="text"
+                                placeholder="ابحث بالاسم أو المعلم..."
+                                value={tableSearch}
+                                onChange={(e) => setTableSearch(e.target.value)}
+                                style={{
+                                    border: 'none',
+                                    outline: 'none',
+                                    background: 'transparent',
+                                    fontSize: '0.85rem',
+                                    width: '100%',
+                                    color: '#1e293b'
+                                }}
+                            />
+                            {tableSearch && (
+                                <button
+                                    onClick={() => setTableSearch('')}
+                                    style={{
+                                        border: 'none',
+                                        background: 'none',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        color: '#94a3b8'
+                                    }}
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
+
+                {/* 7 Columns Professional Table */}
+                <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '0.88rem' }}>
+                        <thead>
+                            <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0' }}>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800 }}>رقم الطلب</th>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800 }}>اسم الطالب</th>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800 }}>نوع الطلب</th>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800 }}>تاريخ الإنشاء</th>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800 }}>المعلم المرسل</th>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800 }}>الحالة</th>
+                                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontWeight: 800, textAlign: 'center' }}>الإجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filteredRequests.length === 0 ? (
+                                <tr>
+                                    <td colSpan="7" style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#94a3b8' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                                            <FileText size={42} weight="light" color="#cbd5e1" />
+                                            <span style={{ fontSize: '1rem', fontWeight: 600, color: '#64748b' }}>
+                                                لا توجد طلبات تطابق الفلتر المحدد
+                                            </span>
+                                            <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                                                يمكنك تغيير خيارات الفلترة أو إعادة ضبط البحث
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredRequests.map((req, idx) => {
+                                    const typeBadge = getRequestTypeBadge(req.request_type);
+                                    const statusBadge = getStatusBadge(req.status);
+                                    const isPending = req.status === 'PENDING';
+
+                                    return (
+                                        <tr
+                                            key={`${req.category || 'REQ'}-${req.id || idx}`}
+                                            style={{
+                                                borderBottom: idx !== filteredRequests.length - 1 ? '1px solid #f1f5f9' : 'none',
+                                                background: idx % 2 === 0 ? '#ffffff' : '#fafafa',
+                                                transition: 'background 0.15s ease'
+                                            }}
+                                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.background = idx % 2 === 0 ? '#ffffff' : '#fafafa'; }}
+                                        >
+                                            {/* 1. Request ID */}
+                                            <td style={{ padding: '1rem', whiteSpace: 'nowrap' }}>
+                                                <span style={{
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '0.85rem',
+                                                    fontWeight: 700,
+                                                    color: '#334155',
+                                                    background: '#e2e8f0',
+                                                    padding: '0.2rem 0.55rem',
+                                                    borderRadius: '6px'
+                                                }}>
+                                                    #REQ-{req.id}
+                                                </span>
+                                            </td>
+
+                                            {/* 2. Student Name */}
+                                            <td style={{ padding: '1rem' }}>
+                                                <div style={{ fontWeight: 800, color: '#133315', fontSize: '0.92rem' }}>
+                                                    {req.student_name}
+                                                </div>
+                                                {req.halaqa && (
+                                                    <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.15rem' }}>
+                                                        {req.halaqa}
+                                                    </div>
+                                                )}
+                                            </td>
+
+                                            {/* 3. Request Type */}
+                                            <td style={{ padding: '1rem', whiteSpace: 'nowrap' }}>
+                                                <span style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.35rem',
+                                                    background: typeBadge.bg,
+                                                    color: typeBadge.color,
+                                                    border: `1px solid ${typeBadge.border}`,
+                                                    padding: '0.25rem 0.65rem',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 700
+                                                }}>
+                                                    {typeBadge.icon}
+                                                    <span>{typeBadge.label}</span>
+                                                </span>
+                                            </td>
+
+                                            {/* 4. Created Date */}
+                                            <td style={{ padding: '1rem', whiteSpace: 'nowrap', color: '#64748b', fontSize: '0.82rem' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                                    <Clock size={14} color="#94a3b8" />
+                                                    <span>{req.created_date || req.created_at || '—'}</span>
+                                                </div>
+                                            </td>
+
+                                            {/* 5. Submitting Teacher */}
+                                            <td style={{ padding: '1rem', whiteSpace: 'nowrap' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#334155', fontWeight: 600 }}>
+                                                    <User size={15} color="#64748b" />
+                                                    <span>{req.submitting_teacher || 'معلم الحلقة'}</span>
+                                                </div>
+                                            </td>
+
+                                            {/* 6. Status */}
+                                            <td style={{ padding: '1rem', whiteSpace: 'nowrap' }}>
+                                                <span style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.35rem',
+                                                    background: statusBadge.bg,
+                                                    color: statusBadge.color,
+                                                    border: `1px solid ${statusBadge.border}`,
+                                                    padding: '0.25rem 0.65rem',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 700
+                                                }}>
+                                                    {statusBadge.icon}
+                                                    <span>{statusBadge.label}</span>
+                                                </span>
+                                            </td>
+
+                                            {/* 7. Actions */}
+                                            <td style={{ padding: '1rem', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem' }}>
+                                                    {/* View Details Button */}
+                                                    <button
+                                                        onClick={() => handleViewDetails(req)}
+                                                        title="عرض التفاصيل"
+                                                        style={{
+                                                            background: '#eff6ff',
+                                                            color: '#1d4ed8',
+                                                            border: '1px solid #bfdbfe',
+                                                            borderRadius: '8px',
+                                                            padding: '0.4rem 0.65rem',
+                                                            fontSize: '0.8rem',
+                                                            fontWeight: 700,
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.3rem',
+                                                            transition: 'background 0.15s ease'
+                                                        }}
+                                                    >
+                                                        <Eye size={15} weight="bold" />
+                                                        <span>التفاصيل</span>
+                                                    </button>
+
+                                                    {/* Go To Student Button */}
+                                                    <button
+                                                        onClick={() => handleNavigateToStudent(req)}
+                                                        title={req.student_id ? 'الانتقال لملف الطالب' : 'طلب إنشاء طالب جديد'}
+                                                        style={{
+                                                            background: req.student_id ? '#f0fdf4' : '#f8fafc',
+                                                            color: req.student_id ? '#15803d' : '#94a3b8',
+                                                            border: `1px solid ${req.student_id ? '#bbf7d0' : '#e2e8f0'}`,
+                                                            borderRadius: '8px',
+                                                            padding: '0.4rem 0.65rem',
+                                                            fontSize: '0.8rem',
+                                                            fontWeight: 700,
+                                                            cursor: req.student_id ? 'pointer' : 'not-allowed',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.3rem'
+                                                        }}
+                                                    >
+                                                        <ArrowSquareOut size={15} weight="bold" />
+                                                        <span>الطالب</span>
+                                                    </button>
+
+                                                    {/* Pending Workflow: Approve & Reject */}
+                                                    {isPending && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleApproveRequest(req)}
+                                                                disabled={actionLoading}
+                                                                title="الموافقة على الطلب"
+                                                                style={{
+                                                                    background: '#558b2f',
+                                                                    color: '#ffffff',
+                                                                    border: 'none',
+                                                                    borderRadius: '8px',
+                                                                    padding: '0.4rem 0.8rem',
+                                                                    fontSize: '0.8rem',
+                                                                    fontWeight: 700,
+                                                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '0.3rem',
+                                                                    opacity: actionLoading ? 0.7 : 1
+                                                                }}
+                                                            >
+                                                                <Check size={14} weight="bold" />
+                                                                <span>موافقة</span>
+                                                            </button>
+
+                                                            <button
+                                                                onClick={() => handleOpenRejectModal(req)}
+                                                                disabled={actionLoading}
+                                                                title="رفض الطلب"
+                                                                style={{
+                                                                    background: '#fee2e2',
+                                                                    color: '#b91c1c',
+                                                                    border: '1px solid #fecaca',
+                                                                    borderRadius: '8px',
+                                                                    padding: '0.4rem 0.8rem',
+                                                                    fontSize: '0.8rem',
+                                                                    fontWeight: 700,
+                                                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '0.3rem',
+                                                                    opacity: actionLoading ? 0.7 : 1
+                                                                }}
+                                                            >
+                                                                <X size={14} weight="bold" />
+                                                                <span>رفض</span>
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
+
+            {/* Phase 4: Request Details Modal */}
+            {isDetailsModalOpen && selectedRequestForDetails && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 10000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '1.5rem',
+                    direction: 'rtl'
+                }}>
+                    <div style={{
+                        background: '#ffffff',
+                        borderRadius: '20px',
+                        width: '100%',
+                        maxWidth: '750px',
+                        maxHeight: '90vh',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+                    }}>
+                        {/* Modal Header */}
+                        <div style={{
+                            padding: '1.25rem 1.75rem',
+                            borderBottom: '1px solid #e2e8f0',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            background: '#f8fafc'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <div style={{
+                                    background: '#133315',
+                                    color: '#ffffff',
+                                    width: '38px',
+                                    height: '38px',
+                                    borderRadius: '10px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}>
+                                    <FileText size={20} weight="bold" />
+                                </div>
+                                <div>
+                                    <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#133315' }}>
+                                        تفاصيل الطلب #{selectedRequestForDetails.id}
+                                    </h4>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem' }}>
+                                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                            النوع: {getRequestTypeBadge(selectedRequestForDetails.request_type).label}
+                                        </span>
+                                        <span style={{ color: '#cbd5e1' }}>•</span>
+                                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                            التاريخ: {selectedRequestForDetails.created_date || selectedRequestForDetails.created_at || '—'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={() => { setIsDetailsModalOpen(false); setSelectedRequestForDetails(null); }}
+                                style={{
+                                    border: 'none',
+                                    background: '#f1f5f9',
+                                    borderRadius: '8px',
+                                    width: '32px',
+                                    height: '32px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    color: '#64748b'
+                                }}
+                            >
+                                <X size={18} weight="bold" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div style={{ padding: '1.5rem 1.75rem', overflowY: 'auto', flex: 1 }}>
+                            {/* Summary Banner */}
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                                gap: '1rem',
+                                background: '#f8fafc',
+                                padding: '1rem',
+                                borderRadius: '12px',
+                                border: '1px solid #e2e8f0',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div>
+                                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>اسم الطالب:</span>
+                                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#133315', marginTop: '0.15rem' }}>
+                                        {selectedRequestForDetails.student_name}
+                                    </div>
+                                </div>
+                                <div>
+                                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>المعلم المرسل:</span>
+                                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155', marginTop: '0.15rem' }}>
+                                        {selectedRequestForDetails.submitting_teacher || 'معلم الحلقة'}
+                                    </div>
+                                </div>
+                                <div>
+                                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>الحلقة:</span>
+                                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155', marginTop: '0.15rem' }}>
+                                        {selectedRequestForDetails.halaqa || 'غير محددة'}
+                                    </div>
+                                </div>
+                                <div>
+                                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>حالة الطلب:</span>
+                                    <div style={{ marginTop: '0.2rem' }}>
+                                        {(() => {
+                                            const badge = getStatusBadge(selectedRequestForDetails.status);
+                                            return (
+                                                <span style={{
+                                                    background: badge.bg,
+                                                    color: badge.color,
+                                                    border: `1px solid ${badge.border}`,
+                                                    padding: '0.15rem 0.55rem',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.78rem',
+                                                    fontWeight: 700,
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.3rem'
+                                                }}>
+                                                    {badge.icon}
+                                                    <span>{badge.label}</span>
+                                                </span>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section: Details Content based on Request Type */}
+                            {selectedRequestForDetails.request_type === 'UPDATE' && selectedRequestForDetails.old_data && selectedRequestForDetails.new_data ? (
+                                <div>
+                                    <h5 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.85rem' }}>
+                                        مقارنة البيانات (القديمة مقابل الجديدة المطلوبة):
+                                    </h5>
+                                    <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '0.85rem' }}>
+                                            <thead>
+                                                <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                                                    <th style={{ padding: '0.65rem 0.85rem', color: '#475569', fontWeight: 700 }}>الحقل</th>
+                                                    <th style={{ padding: '0.65rem 0.85rem', color: '#475569', fontWeight: 700 }}>القيمة السابقة (الحالية)</th>
+                                                    <th style={{ padding: '0.65rem 0.85rem', color: '#047857', fontWeight: 700 }}>القيمة الجديدة المطلوبة</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(() => {
+                                                    const oldD = selectedRequestForDetails.old_data || {};
+                                                    const newD = selectedRequestForDetails.new_data || {};
+                                                    const fieldLabels = {
+                                                        full_name: 'اسم الطالب',
+                                                        phone_number: 'رقم هاتف الطالب',
+                                                        national_id: 'رقم الهوية / الإقامة',
+                                                        parent_name: 'اسم ولي الأمر',
+                                                        parent_phone: 'هاتف ولي الأمر',
+                                                        birth_date: 'تاريخ الميلاد',
+                                                        reached_page: 'الصفحة الحالية',
+                                                        current_juz: 'الجزء الحالي',
+                                                        status: 'حالة القيد',
+                                                        halaqa_name: 'اسم الحلقة'
+                                                    };
+                                                    const allKeys = Array.from(new Set([...Object.keys(oldD), ...Object.keys(newD)]));
+
+                                                    return allKeys.map(k => {
+                                                        const oVal = oldD[k] !== undefined && oldD[k] !== null && oldD[k] !== '' ? String(oldD[k]) : '—';
+                                                        const nVal = newD[k] !== undefined && newD[k] !== null && newD[k] !== '' ? String(newD[k]) : '—';
+                                                        const isChanged = oVal !== nVal;
+
+                                                        return (
+                                                            <tr key={k} style={{
+                                                                borderBottom: '1px solid #f1f5f9',
+                                                                background: isChanged ? '#fefce8' : '#ffffff'
+                                                            }}>
+                                                                <td style={{ padding: '0.65rem 0.85rem', fontWeight: 700, color: '#334155' }}>
+                                                                    {fieldLabels[k] || k}
+                                                                </td>
+                                                                <td style={{ padding: '0.65rem 0.85rem', color: '#64748b' }}>
+                                                                    {oVal}
+                                                                </td>
+                                                                <td style={{ padding: '0.65rem 0.85rem', fontWeight: isChanged ? 800 : 500, color: isChanged ? '#047857' : '#334155' }}>
+                                                                    {nVal}
+                                                                    {isChanged && (
+                                                                        <span style={{ marginRight: '0.5rem', background: '#dcfce7', color: '#15803d', fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                                                                            معدل
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    });
+                                                })()}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ) : selectedRequestForDetails.request_type === 'DELETE' ? (
+                                <div>
+                                    <div style={{
+                                        background: '#fef2f2',
+                                        border: '1.5px solid #fecaca',
+                                        borderRadius: '12px',
+                                        padding: '1.25rem',
+                                        marginBottom: '1rem'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#991b1b', fontWeight: 800, marginBottom: '0.5rem' }}>
+                                            <Trash size={18} weight="bold" />
+                                            <span>طلب حذف الطالب من الحلقة والمنظومة</span>
+                                        </div>
+                                        <p style={{ color: '#7f1d1d', fontSize: '0.88rem', margin: '0 0 0.5rem 0', lineHeight: 1.5 }}>
+                                            سبب الحذف المقدم من المعلم:
+                                        </p>
+                                        <div style={{ background: '#ffffff', border: '1px solid #fecaca', borderRadius: '8px', padding: '0.75rem', color: '#334155', fontWeight: 600 }}>
+                                            {selectedRequestForDetails.notes || selectedRequestForDetails.rejection_reason || 'لم يتم إرفاق سبب تفصيلي للحذف.'}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* CREATE Request: Full Student Details */
+                                <div>
+                                    <h5 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.85rem' }}>
+                                        بيانات الطالب المقدمة للتسجيل:
+                                    </h5>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                        gap: '0.85rem',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '12px',
+                                        padding: '1.25rem',
+                                        background: '#ffffff'
+                                    }}>
+                                        {(() => {
+                                            const d = selectedRequestForDetails.details || {};
+                                            const items = [
+                                                { label: 'الاسم الرباعي', value: d.full_name || selectedRequestForDetails.student_name },
+                                                { label: 'رقم الهوية / الإقامة', value: d.national_id || '—' },
+                                                { label: 'رقم هاتف الطالب', value: d.phone_number || '—' },
+                                                { label: 'اسم ولي الأمر', value: d.parent_name || '—' },
+                                                { label: 'هاتف ولي الأمر', value: d.parent_phone || '—' },
+                                                { label: 'تاريخ الميلاد', value: d.birth_date || '—' },
+                                                { label: 'الجنس', value: d.gender === 'FEMALE' ? 'أنثى' : 'ذكر' },
+                                                { label: 'الصفحة الحالية', value: d.reached_page ? `صفحة ${d.reached_page}` : 'صفحة 1' }
+                                            ];
+
+                                            return items.map((it, idx) => (
+                                                <div key={idx} style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '0.5rem' }}>
+                                                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>{it.label}:</span>
+                                                    <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e293b', marginTop: '0.15rem' }}>
+                                                        {it.value}
+                                                    </div>
+                                                </div>
+                                            ));
+                                        })()}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Additional Notes if any */}
+                            {selectedRequestForDetails.notes && selectedRequestForDetails.request_type !== 'DELETE' && (
+                                <div style={{ marginTop: '1.25rem' }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>
+                                        ملاحظات المعلم المرسل:
+                                    </span>
+                                    <div style={{
+                                        background: '#f8fafc',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '8px',
+                                        padding: '0.75rem',
+                                        marginTop: '0.35rem',
+                                        fontSize: '0.88rem',
+                                        color: '#334155'
+                                    }}>
+                                        {selectedRequestForDetails.notes}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Rejection reason if already rejected */}
+                            {selectedRequestForDetails.status === 'REJECTED' && selectedRequestForDetails.rejection_reason && (
+                                <div style={{ marginTop: '1.25rem' }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#b91c1c' }}>
+                                        سبب الرفض المسجل:
+                                    </span>
+                                    <div style={{
+                                        background: '#fef2f2',
+                                        border: '1px solid #fecaca',
+                                        borderRadius: '8px',
+                                        padding: '0.75rem',
+                                        marginTop: '0.35rem',
+                                        fontSize: '0.88rem',
+                                        color: '#991b1b',
+                                        fontWeight: 600
+                                    }}>
+                                        {selectedRequestForDetails.rejection_reason}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Modal Footer Actions */}
+                        <div style={{
+                            padding: '1.25rem 1.75rem',
+                            borderTop: '1px solid #e2e8f0',
+                            background: '#f8fafc',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '0.75rem'
+                        }}>
+                            <div>
+                                {selectedRequestForDetails.student_id ? (
+                                    <button
+                                        onClick={() => {
+                                            setIsDetailsModalOpen(false);
+                                            handleNavigateToStudent(selectedRequestForDetails);
+                                        }}
+                                        style={{
+                                            background: '#ffffff',
+                                            border: '1px solid #cbd5e1',
+                                            borderRadius: '10px',
+                                            padding: '0.55rem 1rem',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 700,
+                                            color: '#1e293b',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem'
+                                        }}
+                                    >
+                                        <ArrowSquareOut size={16} weight="bold" />
+                                        <span>الانتقال لملف الطالب بالكامل</span>
+                                    </button>
+                                ) : (
+                                    <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                                        طالب جديد لم يتم إنشاء ملفه بعد
+                                    </span>
+                                )}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '0.65rem' }}>
+                                {selectedRequestForDetails.status === 'PENDING' && (
+                                    <>
+                                        <button
+                                            onClick={() => {
+                                                const req = selectedRequestForDetails;
+                                                setIsDetailsModalOpen(false);
+                                                handleOpenRejectModal(req);
+                                            }}
+                                            disabled={actionLoading}
+                                            style={{
+                                                background: '#fee2e2',
+                                                color: '#b91c1c',
+                                                border: '1px solid #fecaca',
+                                                borderRadius: '10px',
+                                                padding: '0.55rem 1.25rem',
+                                                fontSize: '0.88rem',
+                                                fontWeight: 700,
+                                                cursor: actionLoading ? 'not-allowed' : 'pointer'
+                                            }}
+                                        >
+                                            رفض الطلب
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const req = selectedRequestForDetails;
+                                                setIsDetailsModalOpen(false);
+                                                handleApproveRequest(req);
+                                            }}
+                                            disabled={actionLoading}
+                                            style={{
+                                                background: '#558b2f',
+                                                color: '#ffffff',
+                                                border: 'none',
+                                                borderRadius: '10px',
+                                                padding: '0.55rem 1.4rem',
+                                                fontSize: '0.88rem',
+                                                fontWeight: 700,
+                                                cursor: actionLoading ? 'not-allowed' : 'pointer'
+                                            }}
+                                        >
+                                            الموافقة على الطلب
+                                        </button>
+                                    </>
+                                )}
+                                <button
+                                    onClick={() => { setIsDetailsModalOpen(false); setSelectedRequestForDetails(null); }}
+                                    style={{
+                                        background: '#f1f5f9',
+                                        color: '#475569',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '10px',
+                                        padding: '0.55rem 1.25rem',
+                                        fontSize: '0.88rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    إغلاق
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Rejection Reason Modal */}
+            {isRejectModalOpen && requestToReject && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 10001,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '1.5rem',
+                    direction: 'rtl'
+                }}>
+                    <div style={{
+                        background: '#ffffff',
+                        borderRadius: '18px',
+                        width: '100%',
+                        maxWidth: '520px',
+                        overflow: 'hidden',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+                    }}>
+                        <div style={{
+                            padding: '1.25rem 1.5rem',
+                            borderBottom: '1px solid #fecaca',
+                            background: '#fef2f2',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.75rem'
+                        }}>
+                            <div style={{
+                                background: '#fee2e2',
+                                color: '#b91c1c',
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '10px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <XCircle size={22} weight="fill" />
+                            </div>
+                            <div>
+                                <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#991b1b' }}>
+                                    تأكيد رفض الطلب #{requestToReject.id}
+                                </h4>
+                                <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.82rem', color: '#b91c1c' }}>
+                                    الطالب: {requestToReject.student_name}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '1.5rem' }}>
+                            <p style={{ color: '#475569', fontSize: '0.88rem', margin: '0 0 1rem 0' }}>
+                                يرجى توضيح سبب رفض هذا الطلب لمشاركته مع المعلم المرسل:
+                            </p>
+                            <textarea
+                                value={rejectionReasonInput}
+                                onChange={(e) => setRejectionReasonInput(e.target.value)}
+                                placeholder="اكتب سبب الرفض هنا (مثال: البيانات غير مكتملة، عدم مطابقة الشروط)..."
+                                rows={4}
+                                style={{
+                                    width: '100%',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '10px',
+                                    padding: '0.75rem',
+                                    fontSize: '0.88rem',
+                                    color: '#1e293b',
+                                    outline: 'none',
+                                    resize: 'vertical',
+                                    fontFamily: 'inherit'
+                                }}
+                            />
+                        </div>
+
+                        <div style={{
+                            padding: '1rem 1.5rem',
+                            background: '#f8fafc',
+                            borderTop: '1px solid #e2e8f0',
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            gap: '0.75rem'
+                        }}>
+                            <button
+                                onClick={() => {
+                                    setIsRejectModalOpen(false);
+                                    setRequestToReject(null);
+                                    setRejectionReasonInput('');
+                                }}
+                                style={{
+                                    background: '#ffffff',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    padding: '0.55rem 1.25rem',
+                                    fontSize: '0.85rem',
+                                    fontWeight: 700,
+                                    color: '#475569',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                onClick={handleConfirmRejectRequest}
+                                disabled={actionLoading}
+                                style={{
+                                    background: '#dc2626',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '0.55rem 1.4rem',
+                                    fontSize: '0.85rem',
+                                    fontWeight: 700,
+                                    color: '#ffffff',
+                                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    opacity: actionLoading ? 0.7 : 1
+                                }}
+                            >
+                                {actionLoading ? 'جاري الرفض...' : 'تأكيد الرفض'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

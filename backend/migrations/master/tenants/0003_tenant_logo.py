@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tenants', '0001_initial'),
+        ('tenants', '0002_tenant_is_rewards_store_enabled'),
     ]
 
     operations = [

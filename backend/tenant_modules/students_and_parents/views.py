@@ -8,8 +8,9 @@ from django.db.models import Q
 from tenant_modules.halaqat.models import Halaqa
 from tenant_modules.users.models import UserProfile
 from tenant_modules.centers_and_projects.models import Project, ProjectStage, StagePart
-from .models import Student, Parent, StudentEnrollment, StudentRegistrationRequest, StudentDeletionRequest
+from .models import Student, StudentEnrollment, StudentRegistrationRequest, StudentDeletionRequest
 from .utils import resolve_stage_and_part, check_student_project_uniqueness
+from .services import create_or_update_student_user
 
 def _get_requester_profile_helper(req, db):
     import jwt as _jwt
@@ -61,49 +62,7 @@ def get_tenant_db(request):
     except Exception:
         return 'default'
 
-@csrf_exempt
-def parent_list_create_view(request):
-    db_name = get_tenant_db(request)
-    
-    if request.method == 'GET':
-        try:
-            parents = Parent.objects.using(db_name).all().order_by('-created_at')
-            res = []
-            for p in parents:
-                res.append({
-                    "id": str(p.id),
-                    "full_name": p.full_name,
-                    "phone": p.phone,
-                    "email": p.email,
-                    "created_at": p.created_at.isoformat()
-                })
-            return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
 
-        except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب قائمة أولياء الأمور", "details": str(e)}, status=500)
-
-    elif request.method == 'POST':
-        try:
-            data = parse_body(request)
-            
-            if not data.get('full_name') or not data.get('phone'):
-                return JsonResponse({"status": "error", "message": "الاسم الكامل ورقم الهاتف مطلوبان"}, status=400)
-
-            parent = Parent.objects.using(db_name).create(
-                full_name=data['full_name'],
-                phone=data['phone'],
-                email=data.get('email')
-            )
-            return JsonResponse({
-                "status": "success",
-                "message": "تم إضافة ولي الأمر بنجاح",
-                "data": {"id": str(parent.id), "full_name": parent.full_name, "phone": parent.phone}
-            }, status=201)
-
-        except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء إضافة ولي الأمر", "details": str(e)}, status=500)
-    else:
-        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
 @csrf_exempt
@@ -116,7 +75,7 @@ def student_list_create_view(request):
         gender = request.GET.get('gender')
         search = request.GET.get('search')
         try:
-            queryset = Student.objects.using(db_name).select_related('parent', 'halaqa__center').prefetch_related(
+            queryset = Student.objects.using(db_name).select_related('user', 'halaqa__center').prefetch_related(
                 'enrollments__halaqa__project',
                 'enrollments__current_stage',
                 'enrollments__current_part'
@@ -206,9 +165,11 @@ def student_list_create_view(request):
                     "national_id": s.national_id,
                     "birth_date": s.birth_date.isoformat() if s.birth_date else None,
                     "gender": s.gender,
-                    "parent_id": str(s.parent.id) if s.parent else None,
-                    "parent_name": s.parent.full_name if s.parent else None,
-                    "parent_phone": s.parent.phone if s.parent else None,
+                    "parent_id": None,
+                    "parent_name": s.father_name,
+                    "parent_phone": s.father_phone,
+                    "user_id": str(s.user.id) if s.user else None,
+                    "username": s.user.username if s.user else None,
                     "mother_name": s.mother_name,
                     "mother_phone": s.mother_phone,
                     "registration_number": s.registration_number,
@@ -242,19 +203,8 @@ def student_list_create_view(request):
 
             reached_page = int(data.get('reached_page') or 1)
 
-            parent = None
-            if data.get('parent_id'):
-                try:
-                    parent = Parent.objects.using(db_name).get(id=data['parent_id'])
-                except Parent.DoesNotExist:
-                    pass
-            elif data.get('parent_name'):
-                p_name = data.get('parent_name').strip()
-                p_phone = data.get('parent_phone', '').strip()
-                parent, _ = Parent.objects.using(db_name).get_or_create(
-                    full_name=p_name,
-                    defaults={'phone': p_phone}
-                )
+            father_name = data.get('parent_name', '').strip()
+            father_phone = data.get('parent_phone', '').strip()
 
             halaqa = None
             if data.get('halaqa_id'):
@@ -265,7 +215,7 @@ def student_list_create_view(request):
 
             student = Student.objects.using(db_name).create(
                 full_name=data['full_name'].strip(),
-                parent=parent,
+                father_name=father_name, father_phone=father_phone,
                 halaqa=halaqa,
                 gender=data.get('gender') or 'M',
                 national_id=data.get('national_id'),
@@ -283,6 +233,14 @@ def student_list_create_view(request):
                 reached_page=reached_page
             )
 
+            # إنشاء حساب المستخدم للطالب تلقائياً وربطه مباشرة
+            user_obj, profile_obj, temp_password, is_new_user = create_or_update_student_user(
+                db_name,
+                student,
+                password=data.get('password'),
+                raw_username=data.get('username')
+            )
+
             enrollment_info = None
             if halaqa:
                 # التحقق من عدم الانضمام لأكثر من حلقة بنفس المشروع
@@ -296,6 +254,7 @@ def student_list_create_view(request):
 
                 enrollment = StudentEnrollment.objects.using(db_name).create(
                     student=student,
+                    user_profile=profile_obj,
                     halaqa=halaqa,
                     project=halaqa.project,
                     reached_page=reached_page,
@@ -319,11 +278,14 @@ def student_list_create_view(request):
 
             return JsonResponse({
                 "status": "success",
-                "message": "تم إنشاء ملف الطالب وتحديد بيانات حفظه بنجاح",
+                "message": "تم إنشاء ملف الطالب وتوليد حساب المستخدم الخاص به بنجاح",
                 "data": {
                     "id": str(student.id),
                     "full_name": student.full_name,
                     "reached_page": student.reached_page,
+                    "user_id": str(user_obj.id) if user_obj else None,
+                    "username": user_obj.username if user_obj else None,
+                    "temporary_password": temp_password if is_new_user else None,
                     "enrollment": enrollment_info
                 }
             }, status=201)
@@ -338,7 +300,7 @@ def student_list_create_view(request):
 def student_detail_view(request, pk):
     db_name = get_tenant_db(request)
     try:
-        student = Student.objects.using(db_name).select_related('parent', 'halaqa__center').get(id=pk)
+        student = Student.objects.using(db_name).select_related('user', 'halaqa__center').get(id=pk)
     except Student.DoesNotExist:
         return JsonResponse({"status": "error", "message": "ملف الطالب غير موجود"}, status=404)
 
@@ -386,9 +348,11 @@ def student_detail_view(request, pk):
             "national_id": student.national_id,
             "birth_date": student.birth_date.isoformat() if student.birth_date else None,
             "gender": student.gender,
-            "parent_id": str(student.parent.id) if student.parent else None,
-            "parent_name": student.parent.full_name if student.parent else None,
-            "parent_phone": student.parent.phone if student.parent else None,
+            "parent_id": None,
+            "parent_name": student.father_name,
+            "parent_phone": student.father_phone,
+            "user_id": str(student.user.id) if student.user else None,
+            "username": student.user.username if student.user else None,
             "mother_name": student.mother_name,
             "mother_phone": student.mother_phone,
             "registration_number": student.registration_number,
@@ -448,23 +412,10 @@ def student_detail_view(request, pk):
             # Parent update
             parent_name = data.get('parent_name')
             parent_phone = data.get('parent_phone')
-            if 'parent_id' in data and data['parent_id']:
-                try:
-                    student.parent = Parent.objects.using(db_name).get(id=data['parent_id'])
-                except Parent.DoesNotExist:
-                    pass
-            elif parent_name:
-                if student.parent:
-                    student.parent.full_name = parent_name.strip()
-                    if parent_phone is not None:
-                        student.parent.phone = parent_phone.strip()
-                    student.parent.save(using=db_name)
-                else:
-                    new_parent, _ = Parent.objects.using(db_name).get_or_create(
-                        full_name=parent_name.strip(),
-                        defaults={'phone': parent_phone or ''}
-                    )
-                    student.parent = new_parent
+            if parent_name:
+                student.father_name = parent_name.strip()
+            if parent_phone is not None:
+                student.father_phone = parent_phone.strip()
 
             # Halaqa update
             if 'halaqa_id' in data:
@@ -509,10 +460,13 @@ def student_detail_view(request, pk):
     elif request.method == 'DELETE':
         try:
             student_name = student.full_name
+            user_to_delete = student.user
             student.delete(using=db_name)
+            if user_to_delete:
+                user_to_delete.delete(using=db_name)
             return JsonResponse({
                 "status": "success",
-                "message": f"تم حذف ملف الطالب '{student_name}' بنجاح"
+                "message": f"تم حذف ملف الطالب '{student_name}' وحسابه بنجاح"
             }, status=200)
         except Exception as e:
             return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حذف الطالب", "details": str(e)}, status=500)
@@ -1071,6 +1025,21 @@ def record_evaluation_view(request):
             notes=data.get('notes', '')
         )
         
+        try:
+            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+            mem_grade = f"{score}%" if evaluation_type == 'MEMORIZATION' else ""
+            beh_grade = f"{score}%" if evaluation_type == 'BEHAVIOR' else ""
+            StudentNotificationService.notify_daily_evaluation(
+                db_name=db_name,
+                student=student,
+                memorization_grade=mem_grade,
+                behavior_grade=beh_grade,
+                notes=data.get('notes', ''),
+                recitation_type="تقييم حفظ" if evaluation_type == 'MEMORIZATION' else "تقييم سلوك"
+            )
+        except Exception:
+            pass
+
         return JsonResponse({"status": "success", "message": "Evaluation recorded successfully", "data": {"id": str(log.id)}}, status=201)
     except Exception as e:
         return JsonResponse({"status": "error", "message": str(e)}, status=500)
@@ -1268,17 +1237,13 @@ def approve_student_registration_request_view(request, request_id):
             student.save(using=db_name)
             req_type_str = "طلب تعديل بيانات طالب"
         else:
-            parent_obj = None
-            if reg_req.parent_name or reg_req.parent_phone:
-                parent_obj, _ = Parent.objects.using(db_name).get_or_create(
-                    full_name=reg_req.parent_name or "ولي أمر",
-                    defaults={"phone": reg_req.parent_phone or ""}
-                )
+            father_name = reg_req.parent_name or "ولي أمر"
+            father_phone = reg_req.parent_phone or ""
 
             student, _ = Student.objects.using(db_name).get_or_create(
                 full_name=reg_req.full_name,
                 defaults={
-                    "parent": parent_obj,
+                    "father_name": father_name, "father_phone": father_phone,
                     "halaqa": reg_req.halaqa,
                     "gender": reg_req.gender or "M",
                     "birth_date": reg_req.birth_date,
@@ -1295,6 +1260,7 @@ def approve_student_registration_request_view(request, request_id):
                     "reached_page": reg_req.reached_page or 1
                 }
             )
+            create_or_update_student_user(db_name, student)
             req_type_str = "طلب تسجيل طالب جديد"
 
         if reg_req.halaqa:
@@ -1421,11 +1387,18 @@ def approve_student_deletion_request_view(request, request_id):
 
     try:
         del_req = StudentDeletionRequest.objects.using(db_name).select_related(
-            'student', 'requested_by__user'
+            'student', 'student__halaqa', 'requested_by__user'
         ).get(id=request_id)
 
         if del_req.status not in ('PENDING', 'UNDER_REVIEW'):
             return JsonResponse({'status': 'error', 'message': f'لا يمكن اتخاذ قرار على طلب بحالة: {del_req.get_status_display()}'}, status=400)
+
+        if 'CENTER_MANAGER' in roles and 'TENANT_ADMIN' not in roles:
+            del_center = None
+            if del_req.student and del_req.student.halaqa:
+                del_center = del_req.student.halaqa.center
+            if profile.center and del_center and del_center != profile.center:
+                return JsonResponse({'status': 'error', 'message': 'غير مصرح لمدير المركز بالتعامل مع طلبات حذف خارج مركزه'}, status=403)
 
         student = del_req.student
 
@@ -1483,11 +1456,18 @@ def reject_student_deletion_request_view(request, request_id):
 
     try:
         del_req = StudentDeletionRequest.objects.using(db_name).select_related(
-            'student', 'requested_by__user'
+            'student', 'student__halaqa', 'requested_by__user'
         ).get(id=request_id)
 
         if del_req.status not in ('PENDING', 'UNDER_REVIEW'):
             return JsonResponse({'status': 'error', 'message': f'لا يمكن اتخاذ قرار على طلب بحالة: {del_req.get_status_display()}'}, status=400)
+
+        if 'CENTER_MANAGER' in roles and 'TENANT_ADMIN' not in roles:
+            del_center = None
+            if del_req.student and del_req.student.halaqa:
+                del_center = del_req.student.halaqa.center
+            if profile.center and del_center and del_center != profile.center:
+                return JsonResponse({'status': 'error', 'message': 'غير مصرح لمدير المركز برفض طلبات حذف خارج مركزه'}, status=403)
 
         data = parse_body(request)
         rejection_reason = (data.get('rejection_reason') or '').strip()
@@ -1524,5 +1504,202 @@ def reject_student_deletion_request_view(request, request_id):
         return JsonResponse({"status": "error", "message": "طلب الحذف غير موجود"}, status=404)
     except Exception as e:
         return JsonResponse({"status": "error", "message": "فشلت عملية الرفض", "details": str(e)}, status=500)
+
+
+@csrf_exempt
+def bulk_approve_student_requests_view(request):
+    """
+    API للموافقة الجماعية على طلبات الطلاب (إنشاء، تعديل، حذف)
+    يتحقق من الصلاحيات (Admin أو مدير المركز الخاص بالمركز)، يطبق التعديلات، ويشعر المعلمين.
+    """
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    db_name = get_tenant_db(request)
+    profile, err = _get_requester_profile_helper(request, db_name)
+    if err:
+        return err
+
+    roles = profile.get_roles() if profile else []
+    if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
+        return JsonResponse({'status': 'error', 'message': 'عذراً، هذه الصلاحية لمدير النظام أو مدير المركز فقط'}, status=403)
+
+    data = parse_body(request)
+    target_type = (data.get('request_type') or 'CREATE').upper()
+
+    is_center_mgr = ('CENTER_MANAGER' in roles and 'TENANT_ADMIN' not in roles)
+    center = profile.center if is_center_mgr else None
+
+    approved_count = 0
+    decision_date = timezone.now().strftime('%Y-%m-%d %H:%M')
+    reviewer_name = (profile.user.get_full_name() or profile.user.username) if profile and profile.user else 'مدير النظام'
+
+    if target_type in ('CREATE', 'NEW'):
+        qs = StudentRegistrationRequest.objects.using(db_name).filter(
+            status__in=['PENDING', 'UNDER_REVIEW']
+        ).filter(Q(request_type='NEW') | Q(request_type__isnull=True) | Q(request_type=''))
+
+        if is_center_mgr:
+            if not center:
+                return JsonResponse({'status': 'error', 'message': 'حساب مدير المركز غير مرتبط بأي مركز'}, status=403)
+            qs = qs.filter(halaqa__center=center)
+
+        for reg_req in qs:
+            father_name = reg_req.parent_name or "ولي أمر"
+            father_phone = reg_req.parent_phone or ""
+            student, _ = Student.objects.using(db_name).get_or_create(
+                full_name=reg_req.full_name,
+                defaults={
+                    "father_name": father_name, "father_phone": father_phone,
+                    "halaqa": reg_req.halaqa,
+                    "gender": reg_req.gender or "M",
+                    "birth_date": reg_req.birth_date,
+                    "national_id": reg_req.national_id,
+                    "registration_number": reg_req.registration_number or f"STU-{reg_req.id.hex[:6].upper()}",
+                    "mother_name": reg_req.mother_name,
+                    "mother_phone": reg_req.mother_phone,
+                    "current_residence": reg_req.current_residence,
+                    "is_orphan": reg_req.is_orphan,
+                    "has_special_needs": reg_req.has_special_needs,
+                    "special_needs_notes": reg_req.special_needs_notes,
+                    "income_level": reg_req.income_level,
+                    "general_notes": reg_req.general_notes,
+                    "reached_page": reg_req.reached_page or 1
+                }
+            )
+            create_or_update_student_user(db_name, student)
+            if reg_req.halaqa:
+                StudentEnrollment.objects.using(db_name).update_or_create(
+                    student=student,
+                    halaqa=reg_req.halaqa,
+                    defaults={
+                        "project": reg_req.project or reg_req.halaqa.project,
+                        "current_stage": reg_req.current_stage,
+                        "current_part": reg_req.current_part,
+                        "reached_page": reg_req.reached_page or 1,
+                        "is_active": True
+                    }
+                )
+            reg_req.status = 'APPROVED'
+            reg_req.reviewed_by = profile
+            reg_req.save(using=db_name)
+            approved_count += 1
+
+            if reg_req.requested_by and reg_req.requested_by.user:
+                from tenant_modules.centers_and_projects.models import SystemNotification
+                c_obj = reg_req.halaqa.center if reg_req.halaqa else center
+                SystemNotification.objects.using(db_name).create(
+                    recipient=reg_req.requested_by.user,
+                    center=c_obj,
+                    title="الموافقة على طلب تسجيل طالب جديد",
+                    message=f"تمت الموافقة على طلب تسجيل الطالب '{reg_req.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}."
+                )
+
+        return JsonResponse({
+            'status': 'success',
+            'message': f'تمت الموافقة بنجاح على جميع طلبات الإنشاء المعلقة (العدد: {approved_count})',
+            'count': approved_count
+        }, status=200)
+
+    elif target_type == 'UPDATE':
+        qs = StudentRegistrationRequest.objects.using(db_name).filter(
+            status__in=['PENDING', 'UNDER_REVIEW'],
+            request_type='UPDATE'
+        )
+        if is_center_mgr:
+            if not center:
+                return JsonResponse({'status': 'error', 'message': 'حساب مدير المركز غير مرتبط بأي مركز'}, status=403)
+            qs = qs.filter(Q(halaqa__center=center) | Q(student__halaqa__center=center))
+
+        for reg_req in qs:
+            if reg_req.student:
+                student = reg_req.student
+                if reg_req.full_name: student.full_name = reg_req.full_name
+                if reg_req.gender: student.gender = reg_req.gender
+                if reg_req.birth_date: student.birth_date = reg_req.birth_date
+                if reg_req.national_id: student.national_id = reg_req.national_id
+                if reg_req.registration_number: student.registration_number = reg_req.registration_number
+                if reg_req.is_orphan is not None: student.is_orphan = reg_req.is_orphan
+                if reg_req.has_special_needs is not None: student.has_special_needs = reg_req.has_special_needs
+                if reg_req.special_needs_notes: student.special_needs_notes = reg_req.special_needs_notes
+                if reg_req.mother_name: student.mother_name = reg_req.mother_name
+                if reg_req.mother_phone: student.mother_phone = reg_req.mother_phone
+                if reg_req.current_residence: student.current_residence = reg_req.current_residence
+                if reg_req.income_level: student.income_level = reg_req.income_level
+                if reg_req.general_notes: student.general_notes = reg_req.general_notes
+                if reg_req.reached_page: student.reached_page = reg_req.reached_page
+                if reg_req.halaqa: student.halaqa = reg_req.halaqa
+                student.save(using=db_name)
+
+                if reg_req.halaqa:
+                    StudentEnrollment.objects.using(db_name).update_or_create(
+                        student=student,
+                        halaqa=reg_req.halaqa,
+                        defaults={
+                            "project": reg_req.project or reg_req.halaqa.project,
+                            "current_stage": reg_req.current_stage,
+                            "current_part": reg_req.current_part,
+                            "reached_page": reg_req.reached_page or 1,
+                            "is_active": True
+                        }
+                    )
+            reg_req.status = 'APPROVED'
+            reg_req.reviewed_by = profile
+            reg_req.save(using=db_name)
+            approved_count += 1
+
+            if reg_req.requested_by and reg_req.requested_by.user:
+                from tenant_modules.centers_and_projects.models import SystemNotification
+                c_obj = reg_req.halaqa.center if reg_req.halaqa else center
+                SystemNotification.objects.using(db_name).create(
+                    recipient=reg_req.requested_by.user,
+                    center=c_obj,
+                    title="الموافقة على طلب تعديل بيانات طالب",
+                    message=f"تمت الموافقة على طلب تعديل بيانات الطالب '{reg_req.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}."
+                )
+
+        return JsonResponse({
+            'status': 'success',
+            'message': f'تمت الموافقة بنجاح على جميع طلبات التعديل المعلقة (العدد: {approved_count})',
+            'count': approved_count
+        }, status=200)
+
+    elif target_type == 'DELETE':
+        qs = StudentDeletionRequest.objects.using(db_name).filter(
+            status__in=['PENDING', 'UNDER_REVIEW']
+        )
+        if is_center_mgr:
+            if not center:
+                return JsonResponse({'status': 'error', 'message': 'حساب مدير المركز غير مرتبط بأي مركز'}, status=403)
+            qs = qs.filter(student__halaqa__center=center)
+
+        for del_req in qs:
+            student = del_req.student
+            StudentEnrollment.objects.using(db_name).filter(student=student).update(is_active=False)
+            student.halaqa = None
+            student.save(using=db_name)
+
+            del_req.status = 'APPROVED'
+            del_req.reviewed_by = profile
+            del_req.save(using=db_name)
+            approved_count += 1
+
+            if del_req.requested_by and del_req.requested_by.user:
+                from tenant_modules.centers_and_projects.models import SystemNotification
+                c_obj = student.halaqa.center if student and student.halaqa else center
+                SystemNotification.objects.using(db_name).create(
+                    recipient=del_req.requested_by.user,
+                    center=c_obj,
+                    title="الموافقة على طلب حذف طالب",
+                    message=f"تمت الموافقة على طلب حذف الطالب '{student.full_name}' بتاريخ {decision_date} بواسطة {reviewer_name}."
+                )
+
+        return JsonResponse({
+            'status': 'success',
+            'message': f'تمت الموافقة بنجاح على جميع طلبات الحذف المعلقة (العدد: {approved_count})',
+            'count': approved_count
+        }, status=200)
+
+    return JsonResponse({'status': 'error', 'message': f'نوع الطلب غير مدعوم: {target_type}'}, status=400)
 
 

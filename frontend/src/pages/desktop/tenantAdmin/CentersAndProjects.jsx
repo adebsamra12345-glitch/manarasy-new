@@ -20,8 +20,16 @@ import {
     getCentersList
 } from '../../../services/api/tenantService';
 import TestsModule from './tests/TestsModule';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileCentersAndProjects from '../../mobile/tenantAdmin/MobileCentersAndProjects';
 
 const CentersAndProjects = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileCentersAndProjects />;
+    }
+
     // Current User formatting matching reference: "السلام عليكم، أ. محمد العمري"
     const userStr = localStorage.getItem('user');
     let userObj = null;

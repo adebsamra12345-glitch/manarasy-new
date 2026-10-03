@@ -2,6 +2,7 @@ import { House, Books, Users, CalendarBlank, DotsThree, User, Bell } from '@phos
 import { NavLink } from 'react-router-dom';
 
 import { useAuthContext } from '../context/AuthContext';
+import BrandLogo from '../component/common/BrandLogo';
 
 export const MobileTopbar = () => {
     const { user } = useAuthContext();
@@ -20,7 +21,7 @@ export const MobileTopbar = () => {
             </div>
             <div className="mobile-topbar-right">
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary-green)' }}>مَنَارَة</h2>
-                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=133315&color=fff&rounded=true`} alt="شعار منارة" width="30" height="30" />
+                <BrandLogo size={30} />
             </div>
         </header>
     );
@@ -52,10 +53,9 @@ export const MobileNavbar = () => {
         ];
     } else if (normalizedRole === 'parent') {
         items = [
-            { to: '/parent/dashboard', label: 'الرئيسية', icon: House },
-            { to: '/parent/report', label: 'التقرير', icon: Books },
-            { to: '/parent/plan', label: 'الخطة', icon: CalendarBlank },
-            { to: '/parent/notifications', label: 'الإشعارات', icon: Bell },
+            { to: '/student/dashboard', label: 'الرئيسية', icon: House },
+            { to: '/student/report', label: 'المتابعة', icon: Books },
+            { to: '/student/notifications', label: 'الإشعارات', icon: Bell },
         ];
     }
 

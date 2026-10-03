@@ -11,8 +11,16 @@ import {
     updateCenter,
     deleteCenter
 } from '../../../services/api/tenantService';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileCentersManagement from '../../mobile/tenantAdmin/MobileCentersManagement';
 
 const CentersManagement = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileCentersManagement />;
+    }
+
     // Current User formatting
     const userStr = localStorage.getItem('user');
     let userObj = null;

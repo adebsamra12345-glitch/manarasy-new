@@ -5,6 +5,7 @@ import {
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
 import UserProfileRoleSwitcher from '../common/UserProfileRoleSwitcher';
+import BrandLogo from '../common/BrandLogo';
 
 const TenantAdminSidebar = () => {
     const { logout } = useAuthContext();
@@ -23,7 +24,7 @@ const TenantAdminSidebar = () => {
     return (
         <aside id="desktop-sidebar-container" className="sidebar-container hide-on-mobile">
             <div className="sidebar-logo">
-                <img src="https://ui-avatars.com/api/?name=م&background=133315&color=fff&rounded=true" alt="شعار منارة" />
+                <BrandLogo size={36} />
                 <span>مَنَارَة</span>
             </div>
             

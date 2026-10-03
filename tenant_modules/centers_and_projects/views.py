@@ -1,15 +1,19 @@
 import json
+import datetime
 import traceback
 import jwt
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from core_system.tenants.models import Tenant
+from tenant_modules.users.models import UserProfile, User
 from .models import (
     Center, Project, ProjectStage, StagePart, 
     ExamTemplate, ExamQuestion, StudentExamResult, SystemNotification,
-    EvaluationTemplate, EvaluationGrade
+    EvaluationTemplate, EvaluationGrade, MosqueWeeklySchedule,
+    TestRubric, RubricErrorType
 )
 
 def parse_body(request):
@@ -20,18 +24,20 @@ def parse_body(request):
     except json.JSONDecodeError:
         raise ValueError("صيغة بيانات غير صالحة")
 
-def is_tenant_admin(request):
-    """دالة مساعدة للتحقق من صلاحيات الإدمن من خلال توكن JWT"""
+def get_token_payload(request):
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        return False
+        return None
     token = auth_header.split(' ')[1]
     try:
         jwt_secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
-        payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
-        return payload.get('role') == 'TENANT_ADMIN'
+        return jwt.decode(token, jwt_secret, algorithms=["HS256"])
     except Exception:
-        return False
+        return None
+
+def is_tenant_admin(request):
+    payload = get_token_payload(request)
+    return payload.get('role') == 'TENANT_ADMIN' if payload else False
 
 def is_admin_or_center_manager(request):
     """دالة مساعدة للتحقق من صلاحيات الإدمن الرئيسي أو مدير المركز"""
@@ -119,10 +125,14 @@ def get_centers_summary_data(centers_qs, db_name):
     حساب وإرجاع كافة البيانات الإحصائية والأنشطة ومعلومات الإدارة للمراكز بشكل مجمع (Bulk Aggregation)
     لتجنب استعلامات N+1 وضمان أفضل أداء.
     """
-    from django.db.models import Count
+    from django.db.models import Count, Q
     from tenant_modules.users.models import UserProfile, AccountRequest
     from tenant_modules.halaqat.models import Halaqa
-    from tenant_modules.students_and_parents.models import Student
+    from tenant_modules.students_and_parents.models import (
+        Student,
+        StudentRegistrationRequest,
+        StudentDeletionRequest
+    )
     from tenant_modules.attendance.models import AttendanceLog
     from tenant_modules.recitation_and_sabr.models import RecitationLog
     from .models import MosqueWeeklySchedule
@@ -222,19 +232,37 @@ def get_centers_summary_data(centers_qs, db_name):
     ).values('center_id').annotate(count=Count('id'))
     mosque_count_map = {item['center_id']: item['count'] for item in mosque_counts}
 
-    # 7. Account Requests per center
-    req_counts = AccountRequest.objects.using(db_name).filter(
-        center_id__in=center_ids
-    ).values('center_id', 'status').annotate(count=Count('id'))
+    # 7. Student Registration & Deletion Requests per center
     requests_stats = {cid: {'open': 0, 'completed': 0} for cid in center_ids}
-    for item in req_counts:
-        cid = item['center_id']
-        st = item['status']
-        cnt = item['count']
-        if cid in requests_stats:
+
+    if halaqa_center_map:
+        reg_counts = StudentRegistrationRequest.objects.using(db_name).filter(
+            halaqa_id__in=halaqa_center_map.keys()
+        ).values('halaqa_id', 'status').annotate(count=Count('id'))
+
+        for item in reg_counts:
+            cid = halaqa_center_map.get(item['halaqa_id'])
+            if not cid:
+                continue
+            st = item['status']
+            cnt = item['count']
             if st == 'PENDING':
                 requests_stats[cid]['open'] += cnt
-            elif st in ['APPROVED', 'REJECTED']:
+            elif st in ['APPROVED', 'REJECTED', 'CANCELLED']:
+                requests_stats[cid]['completed'] += cnt
+
+    del_reqs = StudentDeletionRequest.objects.using(db_name).filter(
+        Q(student__halaqa__center_id__in=center_ids) | Q(student__enrollments__halaqa__center_id__in=center_ids)
+    ).values('student__halaqa__center_id', 'status').annotate(count=Count('id'))
+
+    for item in del_reqs:
+        cid = item['student__halaqa__center_id']
+        if cid in requests_stats:
+            st = item['status']
+            cnt = item['count']
+            if st == 'PENDING':
+                requests_stats[cid]['open'] += cnt
+            elif st in ['APPROVED', 'REJECTED', 'CANCELLED']:
                 requests_stats[cid]['completed'] += cnt
 
     result = []
@@ -318,8 +346,6 @@ def get_centers_summary_data(centers_qs, db_name):
         })
 
     return result
-
-
 @csrf_exempt
 def center_list_create_view(request):
     try:
@@ -382,6 +408,7 @@ def center_list_create_view(request):
 
 @csrf_exempt
 def center_detail_view(request, pk):
+    from tenant_modules.students_and_parents.models import StudentRegistrationRequest, StudentDeletionRequest
     try:
         db_name = get_tenant_db(request)
     except Exception as e:
@@ -428,17 +455,41 @@ def center_detail_view(request, pk):
             for h in halaqat
         ]
 
-        recent_requests = AccountRequest.objects.using(db_name).filter(center=center).order_by('-created_at')[:10]
-        requests_list = [
-            {
+        reg_reqs = StudentRegistrationRequest.objects.using(db_name).filter(
+            halaqa__center=center
+        ).select_related('requested_by__user').order_by('-created_at')[:10]
+
+        # جلب أحدث طلبات الحذف للمركز
+        del_reqs = StudentDeletionRequest.objects.using(db_name).filter(
+            student__halaqa__center=center
+        ).select_related('requested_by__user', 'student').order_by('-created_at')[:10]
+
+        requests_list = []
+        for r in reg_reqs:
+            req_user = r.requested_by.user if r.requested_by else None
+            user_name = f"{req_user.first_name} {req_user.last_name}".strip() or req_user.username if req_user else "معلم"
+            requests_list.append({
                 "id": str(r.id),
-                "requested_by": r.requested_by.username if r.requested_by else "غير معروف",
-                "action_type": r.action_type,
+                "requested_by": f"{user_name} (طالب: {r.full_name})",
+                "action_type": "تسجيل طالب جديد" if r.request_type == 'NEW' else "تعديل بيانات طالب",
                 "status": r.status,
                 "created_at": r.created_at.isoformat() if r.created_at else None
-            }
-            for r in recent_requests
-        ]
+            })
+
+        for r in del_reqs:
+            req_user = r.requested_by.user if r.requested_by else None
+            user_name = f"{req_user.first_name} {req_user.last_name}".strip() or req_user.username if req_user else "معلم"
+            requests_list.append({
+                "id": str(r.id),
+                "requested_by": f"{user_name} (طالب: {r.student.full_name if r.student else ''})",
+                "action_type": "حذف طالب",
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            })
+
+        # ترتيب القائمة المدمجة تنازلياً حسب تاريخ الإنشاء
+        requests_list.sort(key=lambda x: x['created_at'] or '', reverse=True)
+        requests_list = requests_list[:10]
 
         center_data["halaqat"] = halaqat_list
         center_data["recent_requests"] = requests_list
@@ -560,11 +611,12 @@ def serialize_stage(stage):
 
 
 def serialize_project(project):
+    db_name = getattr(project._state, 'db', None) or 'default'
     stages = project.stages.prefetch_related('parts', 'exam_template').all()
     eval_tmpl = project.evaluation_template
     eval_tmpl_data = None
     if eval_tmpl:
-        grades = eval_tmpl.grades.all().order_by('order', 'id')
+        grades = EvaluationGrade.objects.using(db_name).filter(template=eval_tmpl).order_by('order', 'id')
         eval_tmpl_data = {
             "id": str(eval_tmpl.id),
             "title": eval_tmpl.title,
@@ -590,6 +642,8 @@ def serialize_project(project):
         "evaluation_template_id": str(eval_tmpl.id) if eval_tmpl else None,
         "evaluation_template_title": eval_tmpl.title if eval_tmpl else None,
         "evaluation_template": eval_tmpl_data,
+        "test_rubric_id": str(project.test_rubric.id) if project.test_rubric else None,
+        "test_rubric_title": project.test_rubric.title if project.test_rubric else None,
         "is_active": project.is_active,
         "centers": [{"id": str(c.id), "name": c.name} for c in project.centers.all()],
         "stages": [serialize_stage(s) for s in stages],
@@ -597,9 +651,39 @@ def serialize_project(project):
     }
 
 
-def validate_and_get_exam_template(db_name, has_exam, exam_template_id):
+def get_or_create_exam_template_for_rubric(db_name, rubric=None, eval_template=None):
     """
-    التحقق من صحة اختيار نموذج الامتحان عند تفعيل الامتحان للمرحلة أو المشروع
+    توليد أو استرجاع نموذج امتحان تلقائياً بناءً على سلم الاختبار (TestRubric)
+    أو نموذج التقييم (EvaluationTemplate) لضمان ربط المرحلة بنموذج امتحان معتمد.
+    """
+    scale_title = None
+    desc = ""
+    if rubric:
+        scale_title = rubric.title.strip()
+        desc = f"نموذج امتحان مولد تلقائياً من سلم الاختبار ({scale_title})"
+    elif eval_template:
+        scale_title = eval_template.title.strip()
+        desc = f"نموذج امتحان مولد تلقائياً من سلم التقييم ({scale_title})"
+
+    if not scale_title:
+        return None
+
+    tmpl_title = f"اختبار سلم {scale_title}"
+    tmpl = ExamTemplate.objects.using(db_name).filter(title=tmpl_title, is_active=True).first()
+    if not tmpl:
+        tmpl = ExamTemplate.objects.using(db_name).create(
+            title=tmpl_title,
+            description=desc,
+            pass_score=50.00,
+            total_score=100.00,
+            is_active=True
+        )
+    return tmpl
+
+
+def validate_and_get_exam_template(db_name, has_exam, exam_template_id, project=None, rubric=None):
+    """
+    التحقق من صحة اختيار نموذج الامتحان مع التوليد التلقائي من سلم الاختبار إذا وجد
     """
     if not has_exam and not exam_template_id:
         return None, None
@@ -612,16 +696,24 @@ def validate_and_get_exam_template(db_name, has_exam, exam_template_id):
             return None, "عذراً، نموذج الامتحان المحدد غير موجود في المنصة. يرجى اختيار نموذج امتحان موجود."
 
     if has_exam and not exam_template_id:
-        any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
-        if not any_exists:
-            return None, "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
-        else:
-            return None, "عذراً، يجب اختيار وتحديد نموذج امتحان موجود في المنصة عند تفعيل امتحان المرحلة."
+        active_rubric = rubric or (project.test_rubric if project else None)
+        active_eval = project.evaluation_template if project else None
+
+        if active_rubric or active_eval:
+            auto_tmpl = get_or_create_exam_template_for_rubric(db_name, rubric=active_rubric, eval_template=active_eval)
+            if auto_tmpl:
+                return auto_tmpl, None
+
+        any_tmpl = ExamTemplate.objects.using(db_name).filter(is_active=True).first()
+        if any_tmpl:
+            return any_tmpl, None
+
+        return None, "عذراً، لا يوجد أي نموذج امتحان أو سلم اختبار مضاف في المنصة بعد. يرجى اختيار سلم اختبار للمشروع أو إضافة نموذج امتحان أولاً."
 
     return None, None
 
 
-def create_stages_and_parts_for_project(db_name, project, stages_data):
+def create_stages_and_parts_for_project(db_name, project, stages_data, default_exam_template=None):
     """إنشاء المراكز والأجزاء المتسلسلة والمرافقة للمشروع"""
     for s_idx, st_data in enumerate(stages_data, 1):
         st_title = st_data.get('title', f"المرحلة {s_idx}").strip()
@@ -630,9 +722,13 @@ def create_stages_and_parts_for_project(db_name, project, stages_data):
         has_exam = st_data.get('has_exam', False) or project.require_exam_for_all_stages
         exam_template_id = st_data.get('exam_template_id')
         
-        exam_template, err_msg = validate_and_get_exam_template(db_name, has_exam, exam_template_id)
-        if err_msg:
-            raise ValueError(err_msg)
+        exam_template = default_exam_template
+        if not exam_template or exam_template_id:
+            exam_template, err_msg = validate_and_get_exam_template(
+                db_name, has_exam, exam_template_id, project=project, rubric=project.test_rubric
+            )
+            if err_msg:
+                raise ValueError(err_msg)
 
         stage = ProjectStage.objects.using(db_name).create(
             project=project,
@@ -682,6 +778,21 @@ def project_list_create_view(request):
     if request.method == 'GET':
         try:
             projects = Project.objects.using(db_name).prefetch_related('centers', 'stages__parts', 'stages__exam_template', 'evaluation_template__grades').all().order_by('-created_at')
+            payload = get_token_payload(request)
+            if payload and payload.get('role') == 'CENTER_MANAGER':
+                username = payload.get('username')
+                user_id = payload.get('user_id')
+                try:
+                    prof = UserProfile.objects.using(db_name).get(user__username=username) if username else None
+                    if not prof and user_id:
+                        prof = UserProfile.objects.using(db_name).get(user__id=user_id)
+                    if prof and prof.center:
+                        projects = projects.filter(Q(is_global=True) | Q(centers=prof.center)).distinct()
+                    else:
+                        projects = projects.filter(is_global=True)
+                except Exception:
+                    projects = projects.filter(is_global=True)
+
             res = [serialize_project(p) for p in projects]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
@@ -756,13 +867,27 @@ def project_list_create_view(request):
             except EvaluationTemplate.DoesNotExist:
                 return JsonResponse({"status": "error", "message": "نموذج التقييم المحدد غير موجود أو غير نشط"}, status=404)
 
+            test_rubric_id = data.get('test_rubric_id')
+            test_rubric = None
+            if test_rubric_id:
+                try:
+                    test_rubric = TestRubric.objects.using(db_name).get(id=test_rubric_id, is_active=True)
+                except TestRubric.DoesNotExist:
+                    return JsonResponse({"status": "error", "message": "سلم الاختبار المحدد غير موجود أو غير نشط"}, status=404)
+
+            auto_exam_template = None
             if require_exam_for_all_stages:
-                any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
-                if not any_exists:
-                    return JsonResponse({
-                        "status": "error",
-                        "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
-                    }, status=400)
+                if test_rubric or eval_template:
+                    auto_exam_template = get_or_create_exam_template_for_rubric(
+                        db_name, rubric=test_rubric, eval_template=eval_template
+                    )
+                if not auto_exam_template:
+                    any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
+                    if not any_exists:
+                        return JsonResponse({
+                            "status": "error",
+                            "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
+                        }, status=400)
 
             project = Project.objects.using(db_name).create(
                 title=clean_title,
@@ -770,7 +895,8 @@ def project_list_create_view(request):
                 project_type=project_type,
                 is_global=is_global,
                 require_exam_for_all_stages=require_exam_for_all_stages,
-                evaluation_template=eval_template
+                evaluation_template=eval_template,
+                test_rubric=test_rubric
             )
             
             if not is_global and center_ids:
@@ -779,7 +905,9 @@ def project_list_create_view(request):
 
             if stages_data:
                 try:
-                    create_stages_and_parts_for_project(db_name, project, stages_data)
+                    create_stages_and_parts_for_project(
+                        db_name, project, stages_data, default_exam_template=auto_exam_template
+                    )
                 except ValueError as ve:
                     project.delete(using=db_name)
                     return JsonResponse({"status": "error", "message": str(ve)}, status=400)
@@ -826,23 +954,6 @@ def project_detail_view(request, pk):
             project.description = data.get('description', project.description)
             project.project_type = data.get('project_type', project.project_type)
             project.is_global = is_global
-            if 'require_exam_for_all_stages' in data:
-                req_exam = data['require_exam_for_all_stages']
-                if req_exam:
-                    any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
-                    if not any_exists:
-                        return JsonResponse({
-                            "status": "error",
-                            "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
-                        }, status=400)
-                    for st in project.stages.all():
-                        if not st.exam_template:
-                            return JsonResponse({
-                                "status": "error",
-                                "message": "عذراً، يجب اختيار وتحديد نموذج امتحان موجود في المنصة عند تفعيل امتحان المرحلة."
-                            }, status=400)
-                project.require_exam_for_all_stages = req_exam
-
             if 'evaluation_template_id' in data:
                 eval_tmpl_id = data['evaluation_template_id']
                 if not eval_tmpl_id:
@@ -852,6 +963,49 @@ def project_detail_view(request, pk):
                 except EvaluationTemplate.DoesNotExist:
                     return JsonResponse({"status": "error", "message": "نموذج التقييم المحدد غير موجود أو غير نشط"}, status=404)
 
+            if 'test_rubric_id' in data:
+                tr_id = data['test_rubric_id']
+                if tr_id:
+                    try:
+                        project.test_rubric = TestRubric.objects.using(db_name).get(id=tr_id, is_active=True)
+                    except TestRubric.DoesNotExist:
+                        return JsonResponse({"status": "error", "message": "سلم الاختبار المحدد غير موجود أو غير نشط"}, status=404)
+                else:
+                    project.test_rubric = None
+
+            if 'require_exam_for_all_stages' in data:
+                req_exam = data['require_exam_for_all_stages']
+                if req_exam:
+                    auto_tmpl = None
+                    if project.test_rubric or project.evaluation_template:
+                        auto_tmpl = get_or_create_exam_template_for_rubric(
+                            db_name, rubric=project.test_rubric, eval_template=project.evaluation_template
+                        )
+                    if not auto_tmpl:
+                        any_exists = ExamTemplate.objects.using(db_name).filter(is_active=True).exists()
+                        if not any_exists:
+                            return JsonResponse({
+                                "status": "error",
+                                "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
+                            }, status=400)
+                    for st in project.stages.all():
+                        if not st.exam_template:
+                            if auto_tmpl:
+                                st.exam_template = auto_tmpl
+                                st.has_exam = True
+                                st.save(using=db_name)
+                            else:
+                                any_tmpl = ExamTemplate.objects.using(db_name).filter(is_active=True).first()
+                                if any_tmpl:
+                                    st.exam_template = any_tmpl
+                                    st.has_exam = True
+                                    st.save(using=db_name)
+                                else:
+                                    return JsonResponse({
+                                        "status": "error",
+                                        "message": "عذراً، يجب اختيار وتحديد نموذج امتحان موجود في المنصة عند تفعيل امتحان المرحلة."
+                                    }, status=400)
+                project.require_exam_for_all_stages = req_exam
 
             project.save(using=db_name)
             
@@ -922,7 +1076,9 @@ def stage_list_create_view(request, project_id):
             has_exam = data.get('has_exam', False) or project.require_exam_for_all_stages
             exam_template_id = data.get('exam_template_id')
             
-            exam_template, err_msg = validate_and_get_exam_template(db_name, has_exam, exam_template_id)
+            exam_template, err_msg = validate_and_get_exam_template(
+                db_name, has_exam, exam_template_id, project=project, rubric=project.test_rubric
+            )
             if err_msg:
                 return JsonResponse({"status": "error", "message": err_msg}, status=400)
 
@@ -999,7 +1155,9 @@ def stage_detail_view(request, stage_id):
             else:
                 exam_template_id = str(stage.exam_template.id) if stage.exam_template else None
 
-            exam_template, err_msg = validate_and_get_exam_template(db_name, has_exam, exam_template_id)
+            exam_template, err_msg = validate_and_get_exam_template(
+                db_name, has_exam, exam_template_id, project=stage.project, rubric=stage.project.test_rubric
+            )
             if err_msg:
                 return JsonResponse({"status": "error", "message": err_msg}, status=400)
 
@@ -1132,18 +1290,21 @@ def serialize_evaluation_grade(g):
         "id": str(g.id),
         "name": g.name,
         "requires_repeat": g.requires_repeat,
+        "stop_test_action": g.stop_test_action or ("نعم" if g.requires_repeat else "لا"),
         "order": g.order,
-        "color_code": g.color_code
+        "color_code": g.color_code or "أزرق"
     }
 
 def serialize_evaluation_template(tmpl):
-    grades = tmpl.grades.all().order_by('order', 'id')
-    projects = tmpl.projects.all()
+    db_name = getattr(tmpl._state, 'db', None) or 'default'
+    grades = EvaluationGrade.objects.using(db_name).filter(template=tmpl).order_by('order', 'id')
+    projects = Project.objects.using(db_name).filter(evaluation_template=tmpl)
     return {
         "id": str(tmpl.id),
         "title": tmpl.title,
-        "description": tmpl.description,
+        "description": tmpl.description or "",
         "is_active": tmpl.is_active,
+        "grades_count": grades.count(),
         "grades": [serialize_evaluation_grade(g) for g in grades],
         "assigned_projects": [{"id": str(p.id), "title": p.title} for p in projects],
         "created_at": tmpl.created_at.isoformat() if tmpl.created_at else None,
@@ -1160,7 +1321,7 @@ def evaluation_template_list_create_view(request):
 
     if request.method == 'GET':
         try:
-            templates = EvaluationTemplate.objects.using(db_name).filter(is_active=True).prefetch_related('grades', 'projects').order_by('-created_at')
+            templates = EvaluationTemplate.objects.using(db_name).filter(is_active=True).prefetch_related('grades', 'projects').order_by('created_at')
             res = [serialize_evaluation_template(t) for t in templates]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
@@ -1177,7 +1338,7 @@ def evaluation_template_list_create_view(request):
 
             tmpl = EvaluationTemplate.objects.using(db_name).create(
                 title=title.strip(),
-                description=data.get('description'),
+                description=data.get('description', ''),
                 is_active=True
             )
 
@@ -1186,14 +1347,16 @@ def evaluation_template_list_create_view(request):
                 g_name = g_data.get('name', '').strip()
                 if not g_name:
                     continue
-                req_repeat = g_data.get('requires_repeat', False)
+                stop_action = g_data.get('stop_test_action', 'لا')
+                req_repeat = g_data.get('requires_repeat', stop_action == 'نعم')
                 order = g_data.get('order', idx)
-                color = g_data.get('color_code')
+                color = g_data.get('color_code', 'أزرق')
 
                 EvaluationGrade.objects.using(db_name).create(
                     template=tmpl,
                     name=g_name,
                     requires_repeat=req_repeat,
+                    stop_test_action=stop_action,
                     order=order,
                     color_code=color
                 )
@@ -1232,13 +1395,15 @@ def evaluation_template_detail_view(request, pk):
             "data": serialize_evaluation_template(tmpl)
         }, status=200)
 
-    elif request.method == 'PUT':
+    elif request.method in ['PUT', 'PATCH']:
         if not is_admin_or_center_manager(request):
             return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدمن أو مدير المركز مطلوبة لتعديل نموذج التقييم."}, status=403)
         try:
             data = parse_body(request)
-            tmpl.title = data.get('title', tmpl.title).strip()
-            tmpl.description = data.get('description', tmpl.description)
+            if 'title' in data and data['title']:
+                tmpl.title = data['title'].strip()
+            if 'description' in data:
+                tmpl.description = data['description']
             if 'is_active' in data:
                 tmpl.is_active = data['is_active']
             tmpl.save(using=db_name)
@@ -1250,14 +1415,16 @@ def evaluation_template_detail_view(request, pk):
                     g_name = g_data.get('name', '').strip()
                     if not g_name:
                         continue
-                    req_repeat = g_data.get('requires_repeat', False)
+                    stop_action = g_data.get('stop_test_action', 'لا')
+                    req_repeat = g_data.get('requires_repeat', stop_action == 'نعم')
                     order = g_data.get('order', idx)
-                    color = g_data.get('color_code')
+                    color = g_data.get('color_code', 'أزرق')
 
                     EvaluationGrade.objects.using(db_name).create(
                         template=tmpl,
                         name=g_name,
                         requires_repeat=req_repeat,
+                        stop_test_action=stop_action,
                         order=order,
                         color_code=color
                     )
@@ -1286,6 +1453,354 @@ def evaluation_template_detail_view(request, pk):
             return JsonResponse({"status": "success", "message": "تم إلغاء تنشيط (حذف) نموذج التقييم بنجاح"})
         except Exception as e:
             return JsonResponse({"status": "error", "message": "فشل حذف نموذج التقييم", "details": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def evaluation_grade_create_view(request, template_id):
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    if not is_admin_or_center_manager(request):
+        return JsonResponse({"status": "error", "message": "صلاحيات الإدمن أو مدير المركز مطلوبة"}, status=403)
+
+    try:
+        template = EvaluationTemplate.objects.using(db_name).get(id=template_id)
+        data = parse_body(request)
+        name = data.get('name', '').strip()
+        if not name:
+            return JsonResponse({"status": "error", "message": "اسم التقييم مطلوب"}, status=400)
+
+        current_count = template.grades.count()
+        order = data.get('order', current_count + 1)
+        color = data.get('color_code', 'أزرق')
+        stop_action = data.get('stop_test_action', 'لا')
+        requires_repeat = data.get('requires_repeat', stop_action == 'نعم')
+
+        grade = EvaluationGrade.objects.using(db_name).create(
+            template=template,
+            name=name,
+            requires_repeat=requires_repeat,
+            stop_test_action=stop_action,
+            order=order,
+            color_code=color
+        )
+
+        return JsonResponse({
+            "status": "success",
+            "message": "تمت إضافة التقييم بنجاح",
+            "data": serialize_evaluation_grade(grade)
+        }, status=201)
+    except EvaluationTemplate.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "نموذج التقييم غير موجود"}, status=404)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "فشل إضافة التقييم", "details": str(e)}, status=500)
+
+
+@csrf_exempt
+def evaluation_grade_detail_view(request, pk):
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    try:
+        grade = EvaluationGrade.objects.using(db_name).get(id=pk)
+    except EvaluationGrade.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "التقييم غير موجود"}, status=404)
+
+    if not is_admin_or_center_manager(request):
+        return JsonResponse({"status": "error", "message": "صلاحيات الإدمن أو مدير المركز مطلوبة"}, status=403)
+
+    if request.method in ['PUT', 'PATCH']:
+        try:
+            data = parse_body(request)
+            if 'name' in data and data['name']:
+                grade.name = data['name'].strip()
+            if 'color_code' in data:
+                grade.color_code = data['color_code']
+            if 'stop_test_action' in data:
+                grade.stop_test_action = data['stop_test_action']
+                grade.requires_repeat = (data['stop_test_action'] == 'نعم')
+            elif 'requires_repeat' in data:
+                grade.requires_repeat = bool(data['requires_repeat'])
+                grade.stop_test_action = 'نعم' if grade.requires_repeat else 'لا'
+            if 'order' in data:
+                grade.order = int(data['order'])
+            grade.save(using=db_name)
+
+            return JsonResponse({
+                "status": "success",
+                "message": "تم تحديث التقييم بنجاح",
+                "data": serialize_evaluation_grade(grade)
+            }, status=200)
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل تحديث التقييم", "details": str(e)}, status=500)
+
+    elif request.method == 'DELETE':
+        try:
+            grade.delete(using=db_name)
+            return JsonResponse({"status": "success", "message": "تم حذف التقييم بنجاح"})
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل حذف التقييم", "details": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+# ==============================================================================
+# Test Rubrics API (سلالم الاختبارات وأنواع الأخطاء)
+# ==============================================================================
+
+def serialize_rubric_error_type(e):
+    return {
+        "id": str(e.id),
+        "name": e.name,
+        "value": float(e.value) if e.value is not None else 1.0,
+        "max_count": e.max_count,
+        "notes": e.notes or '',
+        "order": e.order
+    }
+
+def serialize_test_rubric(r):
+    db_name = getattr(r._state, 'db', None) or 'default'
+    error_types = RubricErrorType.objects.using(db_name).filter(rubric=r).order_by('order', 'id')
+    return {
+        "id": str(r.id),
+        "title": r.title,
+        "description": r.description or '',
+        "is_active": r.is_active,
+        "error_types_count": error_types.count(),
+        "error_types": [serialize_rubric_error_type(e) for e in error_types],
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None
+    }
+
+
+@csrf_exempt
+def test_rubric_list_create_view(request):
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    if request.method == 'GET':
+        try:
+            rubrics = TestRubric.objects.using(db_name).filter(is_active=True).prefetch_related('error_types').order_by('created_at')
+            res = [serialize_test_rubric(r) for r in rubrics]
+            return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب سلالم الاختبارات", "details": str(e)}, status=500)
+
+    elif request.method == 'POST':
+        if not is_admin_or_center_manager(request):
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدمن أو مدير المركز مطلوبة لإنشاء سلم اختبار."}, status=403)
+        try:
+            data = parse_body(request)
+            title = data.get('title')
+            if not title:
+                return JsonResponse({"status": "error", "message": "عنوان سلم الاختبار مطلوب"}, status=400)
+
+            rubric = TestRubric.objects.using(db_name).create(
+                title=title.strip(),
+                description=data.get('description', ''),
+                is_active=True
+            )
+
+            error_types_data = data.get('error_types', [])
+            for idx, err_data in enumerate(error_types_data, 1):
+                err_name = err_data.get('name', '').strip()
+                if not err_name:
+                    continue
+                val = err_data.get('value', 1.00)
+                max_cnt = err_data.get('max_count', 3)
+                notes = err_data.get('notes', '')
+                order = err_data.get('order', idx)
+
+                RubricErrorType.objects.using(db_name).create(
+                    rubric=rubric,
+                    name=err_name,
+                    value=val,
+                    max_count=max_cnt,
+                    notes=notes,
+                    order=order
+                )
+
+            return JsonResponse({
+                "status": "success",
+                "message": "تم إنشاء سلم الاختبار بنجاح",
+                "data": serialize_test_rubric(rubric)
+            }, status=201)
+
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل إنشاء سلم الاختبار", "details": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def test_rubric_detail_view(request, pk):
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    try:
+        rubric = TestRubric.objects.using(db_name).prefetch_related('error_types').get(id=pk)
+    except TestRubric.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "سلم الاختبار غير موجود"}, status=404)
+
+    if request.method == 'GET':
+        return JsonResponse({
+            "status": "success",
+            "data": serialize_test_rubric(rubric)
+        }, status=200)
+
+    elif request.method in ['PUT', 'PATCH']:
+        if not is_admin_or_center_manager(request):
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدمن أو مدير المركز مطلوبة لتعديل سلم الاختبار."}, status=403)
+        try:
+            data = parse_body(request)
+            if 'title' in data and data['title']:
+                rubric.title = data['title'].strip()
+            if 'description' in data:
+                rubric.description = data['description']
+            if 'is_active' in data:
+                rubric.is_active = data['is_active']
+            rubric.save(using=db_name)
+
+            if 'error_types' in data:
+                rubric.error_types.all().delete()
+                for idx, err_data in enumerate(data['error_types'], 1):
+                    err_name = err_data.get('name', '').strip()
+                    if not err_name:
+                        continue
+                    RubricErrorType.objects.using(db_name).create(
+                        rubric=rubric,
+                        name=err_name,
+                        value=err_data.get('value', 1.00),
+                        max_count=err_data.get('max_count', 3),
+                        notes=err_data.get('notes', ''),
+                        order=err_data.get('order', idx)
+                    )
+
+            return JsonResponse({
+                "status": "success",
+                "message": "تم تعديل سلم الاختبار بنجاح",
+                "data": serialize_test_rubric(rubric)
+            }, status=200)
+
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل تعديل سلم الاختبار", "details": str(e)}, status=500)
+
+    elif request.method == 'DELETE':
+        if not is_admin_or_center_manager(request):
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدمن أو مدير المركز مطلوبة لحذف سلم الاختبار."}, status=403)
+        try:
+            rubric.is_active = False
+            rubric.save(using=db_name)
+            return JsonResponse({"status": "success", "message": "تم إلغاء تنشيط (حذف) سلم الاختبار بنجاح"})
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل حذف سلم الاختبار", "details": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def rubric_error_type_create_view(request, rubric_id):
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    if not is_admin_or_center_manager(request):
+        return JsonResponse({"status": "error", "message": "صلاحيات الإدمن أو مدير المركز مطلوبة لإضافة نوع خطأ"}, status=403)
+
+    try:
+        rubric = TestRubric.objects.using(db_name).get(id=rubric_id)
+        data = parse_body(request)
+        name = data.get('name', '').strip()
+        if not name:
+            return JsonResponse({"status": "error", "message": "اسم نوع الخطأ مطلوب"}, status=400)
+
+        current_count = rubric.error_types.count()
+        order = data.get('order', current_count + 1)
+        value = data.get('value', 1.00)
+        max_count = data.get('max_count', 3)
+        notes = data.get('notes', '')
+
+        err_obj = RubricErrorType.objects.using(db_name).create(
+            rubric=rubric,
+            name=name,
+            value=value,
+            max_count=max_count,
+            notes=notes,
+            order=order
+        )
+
+        return JsonResponse({
+            "status": "success",
+            "message": "تمت إضافة نوع الخطأ بنجاح",
+            "data": serialize_rubric_error_type(err_obj)
+        }, status=201)
+    except TestRubric.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "سلم الاختبار غير موجود"}, status=404)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "فشل إضافة نوع الخطأ", "details": str(e)}, status=500)
+
+
+@csrf_exempt
+def rubric_error_type_detail_view(request, pk):
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    try:
+        err_obj = RubricErrorType.objects.using(db_name).get(id=pk)
+    except RubricErrorType.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "نوع الخطأ غير موجود"}, status=404)
+
+    if not is_admin_or_center_manager(request):
+        return JsonResponse({"status": "error", "message": "صلاحيات الإدمن أو مدير المركز مطلوبة"}, status=403)
+
+    if request.method in ['PUT', 'PATCH']:
+        try:
+            data = parse_body(request)
+            if 'name' in data and data['name']:
+                err_obj.name = data['name'].strip()
+            if 'value' in data:
+                err_obj.value = data['value']
+            if 'max_count' in data:
+                err_obj.max_count = int(data['max_count'])
+            if 'notes' in data:
+                err_obj.notes = data['notes']
+            if 'order' in data:
+                err_obj.order = int(data['order'])
+            err_obj.save(using=db_name)
+
+            return JsonResponse({
+                "status": "success",
+                "message": "تم تحديث نوع الخطأ بنجاح",
+                "data": serialize_rubric_error_type(err_obj)
+            }, status=200)
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل تحديث نوع الخطأ", "details": str(e)}, status=500)
+
+    elif request.method == 'DELETE':
+        try:
+            err_obj.delete(using=db_name)
+            return JsonResponse({"status": "success", "message": "تم حذف نوع الخطأ بنجاح"})
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل حذف نوع الخطأ", "details": str(e)}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1645,3 +2160,293 @@ def system_notifications_view(request):
             return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الإشعارات", "details": str(e)}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+ARABIC_DAYS_LIST = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
+
+@csrf_exempt
+def mosque_schedule_list_create_view(request):
+    """جلب قائمة مواعيد جدول الجلسات أو إضافة موعد جديد"""
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    if request.method == 'GET':
+        center_id = request.GET.get('center_id')
+        project_id = request.GET.get('project_id')
+        month = request.GET.get('month', '2026-02')
+
+        qs = MosqueWeeklySchedule.objects.using(db_name).filter(is_active=True)
+        if center_id:
+            qs = qs.filter(center_id=center_id)
+        if project_id:
+            qs = qs.filter(project_id=project_id)
+        if month:
+            qs = qs.filter(month=month)
+
+        items = qs.select_related('center', 'project').order_by('week_number', 'day_of_week', 'start_time')
+        
+        res = []
+        for item in items:
+            day_idx = item.day_of_week
+            day_name = ARABIC_DAYS_LIST[day_idx] if 0 <= day_idx < len(ARABIC_DAYS_LIST) else ''
+            res.append({
+                "id": str(item.id),
+                "center_id": str(item.center_id) if item.center_id else None,
+                "center_name": item.center.name if item.center else None,
+                "project_id": str(item.project_id) if item.project_id else None,
+                "project_title": item.project.title if item.project else None,
+                "month": item.month,
+                "week_number": item.week_number,
+                "day_of_week": item.day_of_week,
+                "day_name": day_name,
+                "start_time": item.start_time.strftime("%H:%M") if item.start_time else "09:00",
+                "end_time": item.end_time.strftime("%H:%M") if item.end_time else "11:00",
+                "session_title": item.session_title or "",
+                "notes": item.notes or "",
+                "is_active": item.is_active
+            })
+
+        return JsonResponse({
+            "status": "success",
+            "count": len(res),
+            "data": res
+        }, status=200)
+
+    elif request.method == 'POST':
+        try:
+            data = parse_body(request)
+            center_id = data.get('center_id')
+            project_id = data.get('project_id')
+            month = data.get('month', '2026-02')
+            week_number = int(data.get('week_number', 1))
+            day_of_week = int(data.get('day_of_week', 0))
+            start_time_str = data.get('start_time', '09:00')
+            end_time_str = data.get('end_time', '11:00')
+            session_title = data.get('session_title', '')
+            notes = data.get('notes', '')
+
+            def parse_t(t_val, def_h, def_m):
+                if not t_val:
+                    return datetime.time(def_h, def_m)
+                try:
+                    parts = str(t_val).strip().split(':')
+                    return datetime.time(int(parts[0]), int(parts[1][:2]))
+                except Exception:
+                    return datetime.time(def_h, def_m)
+
+            st = parse_t(start_time_str, 9, 0)
+            et = parse_t(end_time_str, 11, 0)
+
+            # Check if an entry already exists for this slot
+            existing = MosqueWeeklySchedule.objects.using(db_name).filter(
+                center_id=center_id if center_id else None,
+                project_id=project_id if project_id else None,
+                month=month,
+                week_number=week_number,
+                day_of_week=day_of_week
+            ).first()
+
+            if existing:
+                existing.start_time = st
+                existing.end_time = et
+                existing.session_title = session_title
+                existing.notes = notes
+                existing.is_active = True
+                existing.save(using=db_name)
+                schedule_obj = existing
+            else:
+                schedule_obj = MosqueWeeklySchedule.objects.using(db_name).create(
+                    center_id=center_id if center_id else None,
+                    project_id=project_id if project_id else None,
+                    month=month,
+                    week_number=week_number,
+                    day_of_week=day_of_week,
+                    start_time=st,
+                    end_time=et,
+                    session_title=session_title,
+                    notes=notes,
+                    is_active=True
+                )
+
+            return JsonResponse({
+                "status": "success",
+                "message": "تم حفظ موعد الجلسة في الجدول بنجاح",
+                "data": {
+                    "id": str(schedule_obj.id),
+                    "center_id": str(schedule_obj.center_id) if schedule_obj.center_id else None,
+                    "project_id": str(schedule_obj.project_id) if schedule_obj.project_id else None,
+                    "month": schedule_obj.month,
+                    "week_number": schedule_obj.week_number,
+                    "day_of_week": schedule_obj.day_of_week,
+                    "start_time": schedule_obj.start_time.strftime("%H:%M"),
+                    "end_time": schedule_obj.end_time.strftime("%H:%M"),
+                    "session_title": schedule_obj.session_title or "",
+                    "notes": schedule_obj.notes or ""
+                }
+            }, status=201)
+
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل إضافة الجلسة في الجدول", "details": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def mosque_schedule_detail_view(request, pk):
+    """جلب، تعديل، أو حذف جلسة من جدول المسجد"""
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    try:
+        schedule = MosqueWeeklySchedule.objects.using(db_name).select_related('center', 'project').get(id=pk)
+    except MosqueWeeklySchedule.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "الجلسة غير موجودة في الجدول"}, status=404)
+
+    if request.method == 'GET':
+        day_idx = schedule.day_of_week
+        day_name = ARABIC_DAYS_LIST[day_idx] if 0 <= day_idx < len(ARABIC_DAYS_LIST) else ''
+        return JsonResponse({
+            "status": "success",
+            "data": {
+                "id": str(schedule.id),
+                "center_id": str(schedule.center_id) if schedule.center_id else None,
+                "center_name": schedule.center.name if schedule.center else None,
+                "project_id": str(schedule.project_id) if schedule.project_id else None,
+                "project_title": schedule.project.title if schedule.project else None,
+                "month": schedule.month,
+                "week_number": schedule.week_number,
+                "day_of_week": schedule.day_of_week,
+                "day_name": day_name,
+                "start_time": schedule.start_time.strftime("%H:%M") if schedule.start_time else "09:00",
+                "end_time": schedule.end_time.strftime("%H:%M") if schedule.end_time else "11:00",
+                "session_title": schedule.session_title or "",
+                "notes": schedule.notes or "",
+                "is_active": schedule.is_active
+            }
+        }, status=200)
+
+    elif request.method in ['PUT', 'PATCH']:
+        try:
+            data = parse_body(request)
+            if 'start_time' in data:
+                parts = str(data['start_time']).strip().split(':')
+                schedule.start_time = datetime.time(int(parts[0]), int(parts[1][:2]))
+            if 'end_time' in data:
+                parts = str(data['end_time']).strip().split(':')
+                schedule.end_time = datetime.time(int(parts[0]), int(parts[1][:2]))
+            if 'session_title' in data:
+                schedule.session_title = data['session_title']
+            if 'notes' in data:
+                schedule.notes = data['notes']
+            if 'is_active' in data:
+                schedule.is_active = bool(data['is_active'])
+            if 'week_number' in data:
+                schedule.week_number = int(data['week_number'])
+            if 'day_of_week' in data:
+                schedule.day_of_week = int(data['day_of_week'])
+
+            schedule.save(using=db_name)
+
+            return JsonResponse({
+                "status": "success",
+                "message": "تم تحديث الجلسة بنجاح",
+                "data": {
+                    "id": str(schedule.id),
+                    "start_time": schedule.start_time.strftime("%H:%M"),
+                    "end_time": schedule.end_time.strftime("%H:%M"),
+                    "session_title": schedule.session_title or "",
+                    "notes": schedule.notes or ""
+                }
+            }, status=200)
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل تحديث الجلسة", "details": str(e)}, status=500)
+
+    elif request.method == 'DELETE':
+        try:
+            schedule.delete(using=db_name)
+            return JsonResponse({"status": "success", "message": "تم حذف الجلسة من الجدول بنجاح"}, status=200)
+        except Exception as e:
+            return JsonResponse({"status": "error", "message": "فشل حذف الجلسة", "details": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def mosque_schedule_bulk_save_view(request):
+    """حفظ كامل جدول الجلسات لمسجد / مركز / مشروع خلال شهر دفعة واحدة"""
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+
+    try:
+        db_name = get_tenant_db(request)
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+    try:
+        data = parse_body(request)
+        center_id = data.get('center_id')
+        project_id = data.get('project_id')
+        month = data.get('month', '2026-02')
+        items = data.get('schedules', [])
+
+        def parse_t(t_val, def_h, def_m):
+            if not t_val:
+                return datetime.time(def_h, def_m)
+            try:
+                parts = str(t_val).strip().split(':')
+                return datetime.time(int(parts[0]), int(parts[1][:2]))
+            except Exception:
+                return datetime.time(def_h, def_m)
+
+        with transaction.atomic(using=db_name):
+            qs_delete = MosqueWeeklySchedule.objects.using(db_name).filter(month=month)
+            if center_id:
+                qs_delete = qs_delete.filter(center_id=center_id)
+            if project_id:
+                qs_delete = qs_delete.filter(project_id=project_id)
+            qs_delete.delete()
+
+            saved_items = []
+            for item in items:
+                week_num = int(item.get('week_number', 1))
+                day_idx = int(item.get('day_of_week', 0))
+                st = parse_t(item.get('start_time'), 9, 0)
+                et = parse_t(item.get('end_time'), 11, 0)
+                title = item.get('session_title', '')
+                notes = item.get('notes', '')
+
+                obj = MosqueWeeklySchedule.objects.using(db_name).create(
+                    center_id=center_id if center_id else None,
+                    project_id=project_id if project_id else None,
+                    month=month,
+                    week_number=week_num,
+                    day_of_week=day_idx,
+                    start_time=st,
+                    end_time=et,
+                    session_title=title,
+                    notes=notes,
+                    is_active=True
+                )
+                saved_items.append({
+                    "id": str(obj.id),
+                    "week_number": obj.week_number,
+                    "day_of_week": obj.day_of_week,
+                    "start_time": obj.start_time.strftime("%H:%M"),
+                    "end_time": obj.end_time.strftime("%H:%M"),
+                    "session_title": obj.session_title,
+                    "notes": obj.notes
+                })
+
+        return JsonResponse({
+            "status": "success",
+            "message": "تم حفظ كامل جدول الجلسات في قاعدة البيانات بنجاح",
+            "count": len(saved_items),
+            "data": saved_items
+        }, status=200)
+
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حفظ جدول الجلسات", "details": str(e)}, status=500)

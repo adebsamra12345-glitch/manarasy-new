@@ -105,6 +105,26 @@ export const claimStudentReward = async (payload) => {
     return res.data;
 };
 
+export const getStudentFollowUp = async (params = {}) => {
+    const res = await apiClient.get('/api/student-portal/follow-up/', { params });
+    return res.data;
+};
+
+export const getStudentNotifications = async (params = {}) => {
+    const res = await apiClient.get('/api/student-portal/notifications/', { params });
+    return res.data;
+};
+
+export const markAllStudentNotificationsRead = async () => {
+    const res = await apiClient.post('/api/student-portal/notifications/mark-read/');
+    return res.data;
+};
+
+export const markStudentNotificationRead = async (id) => {
+    const res = await apiClient.post(`/api/student-portal/notifications/${id}/read/`);
+    return res.data;
+};
+
 // 6. المسابقات
 export const getCompetitionsList = async () => {
     const res = await apiClient.get('/api/competitions/');

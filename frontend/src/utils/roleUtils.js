@@ -14,8 +14,6 @@ export const ROLE_DISPLAY_NAMES = {
     teacher: 'معلم',
     STUDENT: 'طالب',
     student: 'طالب',
-    PARENT: 'ولي أمر',
-    parent: 'ولي أمر',
 };
 
 export const ROLE_DEFAULT_ROUTES = {
@@ -27,10 +25,9 @@ export const ROLE_DEFAULT_ROUTES = {
     center_manager: '/center-manager/dashboard',
     TEACHER: '/teacher/dashboard',
     teacher: '/teacher/dashboard',
-    PARENT: '/parent/dashboard',
-    parent: '/parent/dashboard',
     STUDENT: '/student/dashboard',
     student: '/student/dashboard',
+    parent: '/student/dashboard',
 };
 
 export const getRoleDisplayName = (roleCode) => {
@@ -53,7 +50,6 @@ export const getRoleProfileRoute = (roleCode) => {
         'TENANT_ADMIN': '/admin/profile',
         'CENTER_MANAGER': '/center-manager/profile',
         'TEACHER': '/teacher/profile',
-        'PARENT': '/parent/profile',
         'STUDENT': '/student/profile'
     };
     return map[key] || '/admin/profile';

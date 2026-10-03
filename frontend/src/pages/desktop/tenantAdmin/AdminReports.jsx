@@ -14,6 +14,8 @@ import {
 } from 'recharts';
 import { getReportsData, getAvailableMosqueMonths } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
+import useDeviceType from '../../../hooks/useDeviceType';
+import MobileAdminReports from '../../mobile/tenantAdmin/MobileAdminReports';
 import './adminReports.css';
 
 /* ─── Standard Time Filter Options ────────────────────────────────────────── */
@@ -153,6 +155,11 @@ const AdminReports = () => {
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
     const isCenterManager = (role && role.toLowerCase() === 'center_manager') || location.pathname.startsWith('/center-manager');
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAdminReports />;
+    }
 
     // Dates
     const todayDate = new Date();

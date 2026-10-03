@@ -31,6 +31,7 @@ import AdminRingSessions from './pages/desktop/tenantAdmin/AdminRingSessions';
 import AdminSessionDetail from './pages/desktop/tenantAdmin/AdminSessionDetail';
 import AdminReports from './pages/desktop/tenantAdmin/AdminReports';
 import StudentActivityPage from './pages/desktop/tenantAdmin/StudentActivityPage';
+import AdminSettings from './pages/desktop/tenantAdmin/AdminSettings';
 import PointsAndRewards from './pages/desktop/tenantAdmin/PointsAndRewards';
 import StudentCompetitions from './pages/mobile/student/StudentCompetitions';
 
@@ -46,10 +47,10 @@ import DesktopAttendance from './pages/desktop/teacher/DesktopAttendance';
 import StudentProgressTracker from './pages/desktop/teacher/StudentProgressTracker';
 import DesktopRecitationEvaluation from './pages/desktop/teacher/DesktopRecitationEvaluation';
 
-// ===== Desktop — Parent =====
-import ParentDashboard from './pages/desktop/parent/ParentDashboard';
-import StudentReportCard from './pages/desktop/parent/StudentReportCard';
-import QuranMemorizationPlan from './pages/desktop/parent/QuranMemorizationPlan';
+// ===== Desktop — Student =====
+import StudentDashboard from './pages/desktop/student/StudentDashboard';
+import StudentReportCard from './pages/desktop/student/StudentReportCard';
+import StudentNotifications from './pages/desktop/student/StudentNotifications';
 
 // ===== Placeholder =====
 import PlaceholderView from './pages/PlaceholderView';
@@ -69,8 +70,7 @@ const ROLE_DEFAULT_ROUTE = {
     tenant_admin: '/admin/dashboard',
     center_manager: '/center-manager/dashboard',
     teacher: '/teacher/dashboard',
-    parent: '/parent/dashboard',
-    student: '/parent/dashboard',
+    student: '/student/dashboard',
 };
 
 // ─────────────────────────────────────────────
@@ -164,7 +164,7 @@ function App() {
                                 <Route path="reports" element={<AdminReports />} />
                                 <Route path="reports/student-activity/:studentId" element={<StudentActivityPage />} />
                                 <Route path="students/:studentId/activity" element={<StudentActivityPage />} />
-                                <Route path="settings" element={<PlaceholderView title="الإعدادات" />} />
+                                <Route path="settings" element={<AdminSettings />} />
                                 <Route path="profile" element={<ProfilePage />} />
                             </Route>
 
@@ -222,42 +222,21 @@ function App() {
                             </Route>
 
                             {/* ===================================================
-                                PARENT & STUDENT — /parent/*
-                            =================================================== */}
-                            <Route
-                                path="/parent"
-                                element={
-                                    <PrivateRoute allowedRoles={['parent', 'student']}>
-                                        <MainLayout />
-                                    </PrivateRoute>
-                                }
-                            >
-                                <Route index element={<Navigate to="dashboard" replace />} />
-                                <Route path="dashboard" element={<ParentDashboard />} />
-                                <Route path="competitions" element={<StudentCompetitions />} />
-                                <Route path="report" element={<StudentReportCard />} />
-                                <Route path="plan" element={<QuranMemorizationPlan />} />
-                                <Route path="notifications" element={<PlaceholderView title="الإشعارات" />} />
-                                <Route path="profile" element={<ProfilePage />} />
-                            </Route>
-
-                            {/* ===================================================
                                 STUDENT DIRECT — /student/*
                             =================================================== */}
                             <Route
                                 path="/student"
                                 element={
-                                    <PrivateRoute allowedRoles={['student', 'parent']}>
+                                    <PrivateRoute allowedRoles={['student']}>
                                         <MainLayout />
                                     </PrivateRoute>
                                 }
                             >
                                 <Route index element={<Navigate to="dashboard" replace />} />
-                                <Route path="dashboard" element={<ParentDashboard />} />
+                                <Route path="dashboard" element={<StudentDashboard />} />
                                 <Route path="competitions" element={<StudentCompetitions />} />
                                 <Route path="report" element={<StudentReportCard />} />
-                                <Route path="plan" element={<QuranMemorizationPlan />} />
-                                <Route path="notifications" element={<PlaceholderView title="الإشعارات" />} />
+                                <Route path="notifications" element={<StudentNotifications />} />
                                 <Route path="profile" element={<ProfilePage />} />
                             </Route>
 
