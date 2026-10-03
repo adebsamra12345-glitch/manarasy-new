@@ -504,6 +504,19 @@ def user_list_create_view(request):
                 users = users.filter(profile__center=requester_profile.center).exclude(profile__role='TENANT_ADMIN')
 
             users = users.select_related('profile', 'profile__center').order_by('-date_joined')
+            
+            # Fetch active circle counts per teacher if eligible_for_circle is requested
+            eligible_for_circle = request.GET.get('eligible_for_circle') == 'true'
+            teacher_circle_counts = {}
+            if eligible_for_circle:
+                from tenant_modules.halaqat.models import Halaqa
+                from django.db.models import Count
+                counts = Halaqa.objects.using(db_name).filter(
+                    is_active=True, deleted_at__isnull=True
+                ).values('teacher_name').annotate(c=Count('id'))
+                for item in counts:
+                    teacher_circle_counts[item['teacher_name']] = item['c']
+
             res = []
             for u in users:
                 prof = getattr(u, 'profile', None)
@@ -519,6 +532,14 @@ def user_list_create_view(request):
                     if not prof.center or str(prof.center.id) != str(center_id_param):
                         continue
 
+                if eligible_for_circle and ('TEACHER' in user_roles or prof.role == 'TEACHER'):
+                    # Max load allowed is 3 circles
+                    teacher_name_str = f"{u.first_name} {u.last_name}".strip() or u.username
+                    count = teacher_circle_counts.get(teacher_name_str, 0)
+                    MAX_CIRCLES = 3
+                    if count >= MAX_CIRCLES:
+                        continue
+
                 item = {
                     "id": str(u.id),
                     "username": u.username,
@@ -532,6 +553,11 @@ def user_list_create_view(request):
                     "is_active": u.is_active,
                     "created_at": u.date_joined.isoformat()
                 }
+                
+                if eligible_for_circle and ('TEACHER' in user_roles or prof.role == 'TEACHER'):
+                    teacher_name_str = f"{u.first_name} {u.last_name}".strip() or u.username
+                    item['current_circles_count'] = teacher_circle_counts.get(teacher_name_str, 0)
+
                 if prof:
                     item.update(serialize_profile(prof))
                 res.append(item)

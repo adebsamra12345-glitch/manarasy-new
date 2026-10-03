@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowRight, GraduationCap, CalendarBlank, ChartLineUp, BookOpen, Clock, ShieldCheck, ArrowsClockwise } from '@phosphor-icons/react';
+import { ArrowRight, GraduationCap, CalendarBlank, ChartLineUp, BookOpen, Clock, ShieldCheck, ArrowsClockwise, FilePdf } from '@phosphor-icons/react';
 import { getStudentActivityData } from '../../../services/api/tenantService';
 
 const MobileStudentActivityPage = () => {
@@ -26,16 +26,43 @@ const MobileStudentActivityPage = () => {
         fetchActivity();
     }, [studentId]);
 
+    const handleExportPDF = () => {
+        if (!activityData) return;
+        window.print();
+    };
+
     const studentInfo = activityData?.student_info || {};
     const stats = activityData?.summary_stats || {};
 
     return (
         <div style={{ padding: '1rem', paddingBottom: '2rem', direction: 'rtl', fontFamily: 'inherit', background: '#f8fafc', minHeight: '100vh' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-                <button onClick={() => navigate(-1)} style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#333' }}>
-                    <ArrowRight size={18} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                    <button onClick={() => navigate(-1)} style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#333' }}>
+                        <ArrowRight size={18} />
+                    </button>
+                    <h2 style={{ fontSize: '1.2rem', color: '#133315', fontWeight: 'bold', margin: 0 }}>سجل نشاط الطالب</h2>
+                </div>
+                <button
+                    onClick={handleExportPDF}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        background: '#fff',
+                        border: '1px solid #fca5a5',
+                        color: '#b91c1c',
+                        padding: '0.45rem 0.8rem',
+                        borderRadius: '10px',
+                        fontSize: '0.85rem',
+                        fontWeight: 'bold',
+                        cursor: 'pointer'
+                    }}
+                    title="تصدير تقرير PDF"
+                >
+                    <FilePdf size={18} weight="fill" color="#dc2626" />
+                    <span>تصدير PDF</span>
                 </button>
-                <h2 style={{ fontSize: '1.2rem', color: '#133315', fontWeight: 'bold', margin: 0 }}>سجل نشاط الطالب</h2>
             </div>
 
             {loading ? (

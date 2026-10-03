@@ -1,6 +1,10 @@
-import { useState } from 'react';
-import { House, Books, Users, CalendarBlank, User, Bell, SignOut, X, Check, CircleNotch } from '@phosphor-icons/react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { 
+    House, Books, Users, CalendarBlank, User, Bell, SignOut, X, Check, CircleNotch,
+    FolderStar, GraduationCap, ChalkboardTeacher, MapPin, Medal, ChartBar, Gear, DotsThree
+} from '@phosphor-icons/react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import './navbar.css';
 
 import { useAuthContext } from '../../context/AuthContext';
 import { getRoleDisplayName, getRoleDefaultRoute } from '../../utils/roleUtils';
@@ -189,60 +193,188 @@ export const MobileTopbar = () => {
 
 export const MobileNavbar = () => {
     const { role } = useAuthContext();
+    const location = useLocation();
+    const [isMoreOpen, setIsMoreOpen] = useState(false);
     const normalizedRole = role ? role.toLowerCase() : '';
 
-    let items = [
-        { to: '/admin/dashboard', label: 'الرئيسية', icon: House },
-        { to: '/admin/rings', label: 'الحلقات', icon: Books },
-        { to: '/admin/students', label: 'الطلاب', icon: Users },
-        { to: '/admin/users', label: 'المستخدمين', icon: CalendarBlank },
-    ];
+    // إغلاق قائمة المزيد تلقائياً عند الانتقال إلى مسار جديد
+    useEffect(() => {
+        setIsMoreOpen(false);
+    }, [location.pathname]);
 
-    if (normalizedRole === 'teacher') {
-        items = [
-            { to: '/teacher/dashboard', label: 'الرئيسية', icon: House },
-            { to: '/teacher/rings', label: 'الحلقات', icon: Books },
-            { to: '/teacher/students', label: 'الطلاب', icon: Users },
-        ];
-    } else if (normalizedRole === 'tenant_admin') {
-        items = [
-            { to: '/admin/dashboard', label: 'الرئيسية', icon: House },
+    // إغلاق قائمة المزيد عند الضغط على مفتاح Escape
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                setIsMoreOpen(false);
+            }
+        };
+        if (isMoreOpen) {
+            window.addEventListener('keydown', handleKeyDown);
+        }
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isMoreOpen]);
+
+    // تبويبات متطابقة تماماً مع Desktop Sidebar لكل دور
+    let allTabs = [];
+
+    if (normalizedRole === 'tenant_admin') {
+        allTabs = [
+            { to: '/admin/dashboard', label: 'الرئيسية', icon: House, end: true },
             { to: '/admin/rings', label: 'الحلقات', icon: Books },
-            { to: '/admin/students', label: 'الطلاب', icon: Users },
-            { to: '/admin/users', label: 'المستخدمين', icon: CalendarBlank },
+            { to: '/admin/students', label: 'الطلاب', icon: GraduationCap },
+            { to: '/admin/teachers', label: 'المعلمون', icon: ChalkboardTeacher },
+            { to: '/admin/users', label: 'المستخدمون', icon: Users },
+            { to: '/admin/projects', label: 'المشاريع', icon: FolderStar },
+            { to: '/admin/centers', label: 'المراكز', icon: MapPin },
+            { to: '/admin/sessions', label: 'الجلسات', icon: CalendarBlank },
+            { to: '/admin/rewards', label: 'النقاط والمكافآت', icon: Medal },
+            { to: '/admin/reports', label: 'التقارير', icon: ChartBar },
+            { to: '/admin/settings', label: 'الإعدادات', icon: Gear },
+            { to: '/admin/profile', label: 'الملف الشخصي', icon: User },
         ];
     } else if (normalizedRole === 'center_manager') {
-        items = [
-            { to: '/center-manager/dashboard', label: 'الرئيسية', icon: House },
+        // تم استبعاد الإعدادات نهائياً لمدير المركز في الواجهتين
+        allTabs = [
+            { to: '/center-manager/dashboard', label: 'الرئيسية', icon: House, end: true },
             { to: '/center-manager/rings', label: 'الحلقات', icon: Books },
-            { to: '/center-manager/students', label: 'الطلاب', icon: Users },
-            { to: '/center-manager/teachers', label: 'المعلمون', icon: Users },
+            { to: '/center-manager/students', label: 'الطلاب', icon: GraduationCap },
+            { to: '/center-manager/teachers', label: 'المعلمون', icon: ChalkboardTeacher },
+            { to: '/center-manager/sessions', label: 'الجلسات', icon: CalendarBlank },
+            { to: '/center-manager/rewards', label: 'النقاط والمكافآت', icon: Medal },
+            { to: '/center-manager/reports', label: 'التقارير', icon: ChartBar },
+            { to: '/center-manager/profile', label: 'الملف الشخصي', icon: User },
+        ];
+    } else if (normalizedRole === 'teacher') {
+        allTabs = [
+            { to: '/teacher/dashboard', label: 'الرئيسية', icon: House, end: true },
+            { to: '/teacher/rings', label: 'الحلقات', icon: Books },
+            { to: '/teacher/students', label: 'الطلاب', icon: Users },
+            { to: '/teacher/profile', label: 'الملف الشخصي', icon: User },
         ];
     } else if (normalizedRole === 'parent' || normalizedRole === 'student') {
-        items = [
-            { to: '/student/dashboard', label: 'الرئيسية', icon: House },
+        allTabs = [
+            { to: '/student/dashboard', label: 'الرئيسية', icon: House, end: true },
             { to: '/student/report', label: 'المتابعة', icon: Books },
             { to: '/student/competitions', label: 'المسابقات', icon: CalendarBlank },
             { to: '/student/notifications', label: 'الإشعارات', icon: Bell },
+            { to: '/student/profile', label: 'الملف الشخصي', icon: User },
         ];
     } else if (normalizedRole === 'super_admin') {
-        items = [
-            { to: '/super/dashboard', label: 'الرئيسية', icon: House },
+        allTabs = [
+            { to: '/super/dashboard', label: 'الرئيسية', icon: House, end: true },
             { to: '/super/tenants', label: 'المساجد', icon: Books },
+            { to: '/super/invoices', label: 'الاشتراكات والفواتير', icon: CalendarBlank },
+            { to: '/super/health', label: 'صحة النظام', icon: ChartBar },
+            { to: '/super/profile', label: 'الملف الشخصي', icon: User },
+        ];
+    } else {
+        allTabs = [
+            { to: '/admin/dashboard', label: 'الرئيسية', icon: House, end: true },
+            { to: '/admin/rings', label: 'الحلقات', icon: Books },
+            { to: '/admin/students', label: 'الطلاب', icon: GraduationCap },
+            { to: '/admin/users', label: 'المستخدمون', icon: Users },
         ];
     }
 
+    const MAX_PRIMARY_ITEMS = 4;
+    const hasMore = allTabs.length > (MAX_PRIMARY_ITEMS + 1);
+    const primaryItems = hasMore ? allTabs.slice(0, MAX_PRIMARY_ITEMS) : allTabs;
+    const moreItems = hasMore ? allTabs.slice(MAX_PRIMARY_ITEMS) : [];
+
+    // التحقق من تفعيل التبويب
+    const isTabActive = (item) => {
+        if (item.end) {
+            return location.pathname === item.to;
+        }
+        return location.pathname.startsWith(item.to);
+    };
+
+    // التحقق مما إذا كان المسار الحالي ينتمي إلى أحد تبويبات قائمة "المزيد"
+    const isMoreActive = moreItems.some(item => isTabActive(item));
+
     return (
-        <nav id="mobile-navbar-container" className="mobile-navbar hide-on-desktop">
-            {items.map((item, idx) => {
-                const IconComp = item.icon;
-                return (
-                    <NavLink key={idx} to={item.to} className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}>
-                        <IconComp size={24} />
-                        <span>{item.label}</span>
-                    </NavLink>
-                );
-            })}
-        </nav>
+        <>
+            {/* القائمة المنبثقة العمودية للتبويبات الإضافية (Vertical More Menu) */}
+            {isMoreOpen && (
+                <>
+                    <div 
+                        className="mobile-more-backdrop" 
+                        onClick={() => setIsMoreOpen(false)} 
+                        aria-hidden="true"
+                    />
+                    <div 
+                        id="mobile-more-menu" 
+                        className="mobile-more-dropdown" 
+                        role="menu"
+                        aria-label="قائمة التبويبات الإضافية"
+                    >
+                        <div className="mobile-more-header">
+                            <span>التبويبات الإضافية</span>
+                            <button 
+                                type="button" 
+                                className="mobile-more-close-btn"
+                                onClick={() => setIsMoreOpen(false)} 
+                                aria-label="إغلاق قائمة المزيد"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="mobile-more-list">
+                            {moreItems.map((item, idx) => {
+                                const IconComp = item.icon;
+                                const active = isTabActive(item);
+                                return (
+                                    <NavLink
+                                        key={idx}
+                                        to={item.to}
+                                        role="menuitem"
+                                        onClick={() => setIsMoreOpen(false)}
+                                        className={`mobile-more-item ${active ? 'active' : ''}`}
+                                    >
+                                        <IconComp size={20} weight={active ? 'fill' : 'regular'} />
+                                        <span>{item.label}</span>
+                                    </NavLink>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {/* شريط التنقل السفلي الثابت (Bottom Navigation) */}
+            <nav id="mobile-navbar-container" className="mobile-navbar hide-on-desktop">
+                {primaryItems.map((item, idx) => {
+                    const IconComp = item.icon;
+                    const active = isTabActive(item);
+                    return (
+                        <NavLink
+                            key={idx}
+                            to={item.to}
+                            className={`mobile-nav-item ${active ? 'active' : ''}`}
+                        >
+                            <IconComp size={22} weight={active ? 'fill' : 'regular'} />
+                            <span>{item.label}</span>
+                        </NavLink>
+                    );
+                })}
+
+                {/* زر "المزيد" الثابت في أقصى اليسار إذا كانت هناك تبويبات إضافية */}
+                {hasMore && (
+                    <button
+                        id="btn-mobile-nav-more"
+                        type="button"
+                        onClick={() => setIsMoreOpen(prev => !prev)}
+                        className={`mobile-nav-item ${isMoreActive || isMoreOpen ? 'active' : ''}`}
+                        aria-expanded={isMoreOpen}
+                        aria-haspopup="true"
+                        aria-label="المزيد من التبويبات"
+                    >
+                        <DotsThree size={24} weight={isMoreActive || isMoreOpen ? 'bold' : 'regular'} />
+                        <span>المزيد</span>
+                    </button>
+                )}
+            </nav>
+        </>
     );
 };

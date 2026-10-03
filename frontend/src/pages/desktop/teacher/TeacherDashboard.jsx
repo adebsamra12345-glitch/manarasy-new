@@ -5,8 +5,7 @@ import { useAuthContext } from '../../../context/AuthContext';
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileHalqaList from '../../mobile/teacher/MobileHalqaList';
 
-const TeacherDashboard = () => {
-    const { isMobile } = useDeviceType();
+const DesktopTeacherDashboard = () => {
     const today = new Date();
     const dateStr = today.toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -16,10 +15,6 @@ const TeacherDashboard = () => {
     const [analytics, setAnalytics] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-
-    if (isMobile) {
-        return <MobileHalqaList hideRings={true} />;
-    }
 
     useEffect(() => {
         const fetchData = async () => {
@@ -160,6 +155,16 @@ const TeacherDashboard = () => {
             </div>
         </div>
     );
+};
+
+const TeacherDashboard = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileHalqaList hideRings={true} />;
+    }
+
+    return <DesktopTeacherDashboard />;
 };
 
 export default TeacherDashboard;

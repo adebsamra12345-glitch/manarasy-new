@@ -21,20 +21,18 @@ import {
     updateStoreSettings,
     getCompetitionsList,
     createCompetition,
+    updateCompetition,
     deleteCompetition,
-    addCompetitionQuestion
+    getCompetitionDetail,
+    addCompetitionQuestion,
+    updateCompetitionQuestion,
+    deleteCompetitionQuestion
 } from '../../../services/pointsAndRewardsApi';
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobilePointsAndRewards from '../../mobile/tenantAdmin/MobilePointsAndRewards';
 import './pointsAndRewards.css';
 
-const PointsAndRewards = () => {
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobilePointsAndRewards />;
-    }
-
+const DesktopPointsAndRewards = () => {
     const navigate = useNavigate();
     const location = useLocation();
     
@@ -81,7 +79,7 @@ const PointsAndRewards = () => {
     const [isRewardModalOpen, setIsRewardModalOpen] = useState(false);
     const [editingReward, setEditingReward] = useState(null);
     const [rewardFormData, setRewardFormData] = useState({
-        name: '', points_cost: 50, stock_quantity: -1, description: '', image: ''
+        name: '', points_cost: 50, stock_quantity: 0, description: '', image: ''
     });
 
     // 3. Claims State
@@ -100,13 +98,18 @@ const PointsAndRewards = () => {
     // 5. Competitions State
     const [competitions, setCompetitions] = useState([]);
     const [isCompetitionModalOpen, setIsCompetitionModalOpen] = useState(false);
+    const [editingCompetition, setEditingCompetition] = useState(null);
+    const [confirmDeleteModal, setConfirmDeleteModal] = useState({ open: false, type: '', id: null, title: '' });
     const [compFormData, setCompFormData] = useState({
         title: '', duration_minutes: 30, points_reward: 10, max_attempts: 1, description: ''
     });
 
     // Add Question Modal
+    const [expandedCompId, setExpandedCompId] = useState(null);
+    const [compQuestions, setCompQuestions] = useState({});
     const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
     const [selectedCompForQuestion, setSelectedCompForQuestion] = useState(null);
+    const [editingQuestion, setEditingQuestion] = useState(null);
     const [questionFormData, setQuestionFormData] = useState({
         question_text: '',
         question_type: 'MULTIPLE_CHOICE',
@@ -254,7 +257,7 @@ const PointsAndRewards = () => {
         } else {
             setEditingReward(null);
             setRewardFormData({
-                name: '', points_cost: 50, stock_quantity: -1, description: '', image: ''
+                name: '', points_cost: 50, stock_quantity: 0, description: '', image: ''
             });
         }
         setIsRewardModalOpen(true);
@@ -284,18 +287,13 @@ const PointsAndRewards = () => {
         }
     };
 
-    const handleDeleteReward = async (id) => {
-        if (!window.confirm('هل أنت متأكد من حذف هذه المكافأة؟')) return;
-        try {
-            const res = await deleteReward(id);
-            if (res.status === 'success') {
-                showToast('تم حذف المكافأة بنجاح');
-                loadData();
-            }
-        } catch (err) {
-            console.error(err);
-            showToast('فشل حذف المكافأة', 'error');
-        }
+    const handleDeleteReward = (reward) => {
+        setConfirmDeleteModal({
+            open: true,
+            type: 'reward',
+            id: reward.id,
+            title: reward.name
+        });
     };
 
     // --- Claims Management Actions ---
@@ -357,38 +355,137 @@ const PointsAndRewards = () => {
     };
 
     // --- Competitions Actions ---
+    const handleOpenCompetitionModal = (comp = null) => {
+        if (comp) {
+            setEditingCompetition(comp);
+            setCompFormData({
+                title: comp.title || '',
+                duration_minutes: comp.duration_minutes || 30,
+                points_reward: comp.points_reward || 10,
+                max_attempts: comp.max_attempts || 1,
+                description: comp.description || ''
+            });
+        } else {
+            setEditingCompetition(null);
+            setCompFormData({
+                title: '',
+                duration_minutes: 30,
+                points_reward: 10,
+                max_attempts: 1,
+                description: ''
+            });
+        }
+        setIsCompetitionModalOpen(true);
+    };
+
     const handleSaveCompetition = async (e) => {
         e.preventDefault();
+        if (!compFormData.title.trim()) {
+            showToast('يرجى إدخال عنوان المسابقة', 'error');
+            return;
+        }
         try {
-            const res = await createCompetition(compFormData);
-            if (res.status === 'success') {
-                showToast('تم إنشاء المسابقة بنجاح');
-                setIsCompetitionModalOpen(false);
-                setCompFormData({ title: '', duration_minutes: 30, points_reward: 10, max_attempts: 1, description: '' });
-                loadData();
+            if (editingCompetition) {
+                const res = await updateCompetition(editingCompetition.id, compFormData);
+                if (res.status === 'success') {
+                    showToast('تم تحديث المسابقة بنجاح');
+                    setIsCompetitionModalOpen(false);
+                    setEditingCompetition(null);
+                    setCompFormData({ title: '', duration_minutes: 30, points_reward: 10, max_attempts: 1, description: '' });
+                    loadData();
+                }
+            } else {
+                const res = await createCompetition(compFormData);
+                if (res.status === 'success') {
+                    showToast('تم إنشاء المسابقة بنجاح');
+                    setIsCompetitionModalOpen(false);
+                    setCompFormData({ title: '', duration_minutes: 30, points_reward: 10, max_attempts: 1, description: '' });
+                    loadData();
+                }
             }
         } catch (err) {
             console.error(err);
-            showToast(err.response?.data?.message || 'فشل إنشاء المسابقة', 'error');
+            showToast(err.response?.data?.message || 'فشل حفظ المسابقة', 'error');
         }
     };
 
-    const handleDeleteCompetition = async (id) => {
-        if (!window.confirm('هل أنت متأكد من حذف هذه المسابقة؟')) return;
+    const handleDeleteCompetition = (comp) => {
+        setConfirmDeleteModal({
+            open: true,
+            type: 'competition',
+            id: comp.id,
+            title: comp.title
+        });
+    };
+
+    const handleDeleteQuestion = (q, compId) => {
+        setConfirmDeleteModal({
+            open: true,
+            type: 'question',
+            id: q.id,
+            title: 'هذا السؤال',
+            parentId: compId
+        });
+    };
+
+    const handleExecuteDelete = async () => {
+        const { type, id, parentId } = confirmDeleteModal;
+        if (!id) return;
         try {
-            const res = await deleteCompetition(id);
-            if (res.status === 'success') {
-                showToast('تم حذف المسابقة بنجاح');
-                loadData();
+            if (type === 'competition') {
+                const res = await deleteCompetition(id);
+                if (res.status === 'success') {
+                    showToast('تم حذف المسابقة بنجاح');
+                    setConfirmDeleteModal({ open: false, type: '', id: null, title: '' });
+                    loadData();
+                }
+            } else if (type === 'reward') {
+                const res = await deleteReward(id);
+                if (res.status === 'success') {
+                    showToast('تم حذف المكافأة بنجاح');
+                    setConfirmDeleteModal({ open: false, type: '', id: null, title: '' });
+                    loadData();
+                }
+            } else if (type === 'question') {
+                const res = await deleteCompetitionQuestion(id);
+                if (res.status === 'success') {
+                    showToast('تم حذف السؤال بنجاح');
+                    setConfirmDeleteModal({ open: false, type: '', id: null, title: '' });
+                    if (parentId) loadCompQuestions(parentId);
+                    loadData();
+                }
             }
         } catch (err) {
             console.error(err);
-            showToast('فشل حذف المسابقة', 'error');
+            showToast('فشل تنفيذ عملية الحذف', 'error');
+        }
+    };
+
+    const loadCompQuestions = async (compId) => {
+        try {
+            const res = await getCompetitionDetail(compId);
+            if (res?.status === 'success') {
+                setCompQuestions(prev => ({ ...prev, [compId]: res.data.questions }));
+            }
+        } catch (err) {
+            console.error('Failed to load questions', err);
+        }
+    };
+
+    const handleToggleCompQuestions = (compId) => {
+        if (expandedCompId === compId) {
+            setExpandedCompId(null);
+            return;
+        }
+        setExpandedCompId(compId);
+        if (!compQuestions[compId]) {
+            loadCompQuestions(compId);
         }
     };
 
     const handleOpenAddQuestion = (comp) => {
         setSelectedCompForQuestion(comp);
+        setEditingQuestion(null);
         setQuestionFormData({
             question_text: '',
             question_type: 'MULTIPLE_CHOICE',
@@ -399,19 +496,36 @@ const PointsAndRewards = () => {
         setIsQuestionModalOpen(true);
     };
 
+    const handleOpenEditQuestion = (comp, q) => {
+        setSelectedCompForQuestion(comp);
+        setEditingQuestion(q);
+        setQuestionFormData({
+            question_text: q.question_text || '',
+            question_type: q.question_type || 'MULTIPLE_CHOICE',
+            options: q.options && q.options.length === 4 ? q.options : ['', '', '', ''],
+            correct_answer: q.correct_answer || '',
+            points: q.points || 1.0
+        });
+        setIsQuestionModalOpen(true);
+    };
+
     const handleSaveQuestion = async (e) => {
         e.preventDefault();
         if (!selectedCompForQuestion) return;
         try {
-            const res = await addCompetitionQuestion(selectedCompForQuestion.id, questionFormData);
-            if (res.status === 'success') {
+            if (editingQuestion) {
+                await updateCompetitionQuestion(editingQuestion.id, questionFormData);
+                showToast('تم تحديث السؤال بنجاح');
+            } else {
+                await addCompetitionQuestion(selectedCompForQuestion.id, questionFormData);
                 showToast('تمت إضافة السؤال بنجاح');
-                setIsQuestionModalOpen(false);
-                loadData();
             }
+            setIsQuestionModalOpen(false);
+            loadCompQuestions(selectedCompForQuestion.id);
+            loadData(); // To update total question counts
         } catch (err) {
             console.error(err);
-            showToast(err.response?.data?.message || 'فشل إضافة السؤال', 'error');
+            showToast(err.response?.data?.message || 'فشل حفظ السؤال', 'error');
         }
     };
 
@@ -686,7 +800,7 @@ const PointsAndRewards = () => {
                                 <div key={reward.id} className="pr-reward-card">
                                     <div className="pr-reward-img-wrapper">
                                         {reward.image ? (
-                                            <img src={reward.image} alt={reward.name} />
+                                            <img src={reward.image?.startsWith('http') ? `/api/proxy-image/?url=${encodeURIComponent(reward.image)}` : reward.image} alt={reward.name} />
                                         ) : (
                                             <div className="pr-reward-placeholder">
                                                 <Gift size={48} />
@@ -710,7 +824,7 @@ const PointsAndRewards = () => {
                                         <button className="pr-icon-btn" onClick={() => handleOpenRewardModal(reward)} title="تعديل">
                                             <PencilSimple size={18} />
                                         </button>
-                                        <button className="pr-icon-btn pr-btn-delete" onClick={() => handleDeleteReward(reward.id)} title="حذف">
+                                        <button className="pr-icon-btn pr-btn-delete" onClick={() => handleDeleteReward(reward)} title="حذف">
                                             <Trash size={18} />
                                         </button>
                                     </div>
@@ -864,7 +978,7 @@ const PointsAndRewards = () => {
                 <div className="pr-view-section">
                     <div className="pr-table-toolbar">
                         <h2>المسابقات القرآنية المتاحة</h2>
-                        <button className="pr-action-btn-green" onClick={() => setIsCompetitionModalOpen(true)}>
+                        <button className="pr-action-btn-green" onClick={() => handleOpenCompetitionModal()}>
                             <Plus size={18} />
                             إنشاء مسابقة جديدة
                         </button>
@@ -896,8 +1010,8 @@ const PointsAndRewards = () => {
                                             <span>النقاط</span>
                                             <strong style={{ color: '#d97706' }}>+{comp.points_reward} نقطة</strong>
                                         </div>
-                                        <div className="pr-comp-stat">
-                                            <span>الأسئلة</span>
+                                        <div className="pr-comp-stat" style={{ cursor: 'pointer' }} onClick={() => handleToggleCompQuestions(comp.id)}>
+                                            <span>الأسئلة <CaretDown size={14} style={{ transform: expandedCompId === comp.id ? 'rotate(180deg)' : 'none', marginLeft: 4, display: 'inline-block' }} /></span>
                                             <strong>{comp.questions_count} سؤال</strong>
                                         </div>
                                         <div className="pr-comp-stat">
@@ -907,12 +1021,45 @@ const PointsAndRewards = () => {
                                             </strong>
                                         </div>
                                     </div>
+
+                                    {/* Questions Accordion */}
+                                    {expandedCompId === comp.id && (
+                                        <div style={{ background: '#f8fafc', padding: '1rem', borderTop: '1px solid #e2e8f0', borderRadius: '0 0 12px 12px', marginTop: '-8px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                                <h5 style={{ margin: 0, fontSize: '1rem', color: '#334155' }}>أسئلة المسابقة ({compQuestions[comp.id]?.length || 0})</h5>
+                                                <button onClick={() => handleOpenAddQuestion(comp)} style={{ background: 'none', border: 'none', color: '#16a34a', fontSize: '0.9rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+                                                    <Plus size={16} /> إضافة سؤال
+                                                </button>
+                                            </div>
+                                            {compQuestions[comp.id] && compQuestions[comp.id].length > 0 ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                                                    {compQuestions[comp.id].map((q, idx) => (
+                                                        <div key={q.id} style={{ background: '#fff', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                                <div style={{ flex: 1 }}>
+                                                                    <strong style={{ color: '#1e293b', fontSize: '0.95rem' }}>{idx + 1}. {q.question_text}</strong>
+                                                                    <div style={{ color: '#64748b', marginTop: '0.3rem', fontSize: '0.85rem' }}>النوع: {q.question_type === 'MULTIPLE_CHOICE' ? 'اختيار من متعدد' : q.question_type === 'TRUE_FALSE' ? 'صح/خطأ' : q.question_type === 'MATCHING' ? 'مطابقة' : 'مقال'} | الدرجة: {q.points}</div>
+                                                                </div>
+                                                                <div style={{ display: 'flex', gap: '0.6rem' }}>
+                                                                    <button onClick={() => handleOpenEditQuestion(comp, q)} style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer' }} title="تعديل السؤال"><PencilSimple size={18} /></button>
+                                                                    <button onClick={() => handleDeleteQuestion(q, comp.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }} title="حذف السؤال"><Trash size={18} /></button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p style={{ margin: 0, fontSize: '0.9rem', color: '#94a3b8', textAlign: 'center' }}>لا توجد أسئلة مضافة بعد.</p>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="pr-comp-actions">
-                                        <button className="pr-action-btn-outline" onClick={() => handleOpenAddQuestion(comp)}>
-                                            <Plus size={16} />
-                                            إضافة سؤال
+                                        <button className="pr-action-btn-outline" onClick={() => handleOpenCompetitionModal(comp)} title="تعديل المسابقة">
+                                            <PencilSimple size={16} />
+                                            تعديل
                                         </button>
-                                        <button className="pr-icon-btn pr-btn-delete" onClick={() => handleDeleteCompetition(comp.id)}>
+                                        <button className="pr-icon-btn pr-btn-delete" onClick={() => handleDeleteCompetition(comp)} title="حذف المسابقة">
                                             <Trash size={18} />
                                         </button>
                                     </div>
@@ -1297,10 +1444,11 @@ const PointsAndRewards = () => {
                                     />
                                 </div>
                                 <div className="pr-form-group">
-                                    <label className="pr-form-label">الكمية (-1 تعني غير محدود):</label>
+                                    <label className="pr-form-label">الكمية:</label>
                                     <input
                                         type="number"
                                         className="pr-form-input"
+                                        min="0"
                                         value={rewardFormData.stock_quantity}
                                         onChange={(e) => setRewardFormData({ ...rewardFormData, stock_quantity: Number(e.target.value) })}
                                         required
@@ -1334,7 +1482,7 @@ const PointsAndRewards = () => {
                                 <button type="button" className="pr-btn-secondary" onClick={() => setIsRewardModalOpen(false)}>
                                     إلغاء
                                 </button>
-                                <button type="submit" className="pr-action-btn-green">
+                                <button type="submit" className="pr-action-btn-green" disabled={rewardFormData.stock_quantity < 0}>
                                     {editingReward ? 'حفظ التعديلات' : 'إضافة المكافأة'}
                                 </button>
                             </div>
@@ -1343,12 +1491,12 @@ const PointsAndRewards = () => {
                 </div>
             )}
 
-            {/* 6. Modal إنشاء مسابقة */}
+            {/* 6. Modal إنشاء / تعديل مسابقة */}
             {isCompetitionModalOpen && (
                 <div className="pr-modal-overlay">
                     <div className="pr-modal-box">
                         <div className="pr-modal-header">
-                            <h3 className="pr-modal-title">إنشاء مسابقة تفاعلية جديدة</h3>
+                            <h3 className="pr-modal-title">{editingCompetition ? 'تعديل المسابقة' : 'إنشاء مسابقة تفاعلية جديدة'}</h3>
                             <button className="pr-modal-close" onClick={() => setIsCompetitionModalOpen(false)}>
                                 <X size={20} />
                             </button>
@@ -1408,10 +1556,45 @@ const PointsAndRewards = () => {
                                     إلغاء
                                 </button>
                                 <button type="submit" className="pr-action-btn-green">
-                                    إنشاء المسابقة
+                                    {editingCompetition ? 'حفظ التعديلات' : 'إنشاء المسابقة'}
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal تأكيد الحذف */}
+            {confirmDeleteModal.open && (
+                <div className="pr-modal-overlay">
+                    <div className="pr-modal-box" style={{ maxWidth: 420 }}>
+                        <div className="pr-modal-header">
+                            <h3 className="pr-modal-title" style={{ color: '#dc2626' }}>تأكيد الحذف</h3>
+                            <button className="pr-modal-close" onClick={() => setConfirmDeleteModal({ open: false, type: '', id: null, title: '' })}>
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div style={{ padding: '1.2rem', textAlign: 'center' }}>
+                            <p style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: '#334155' }}>
+                                هل أنت متأكد من رغبتك في حذف{' '}
+                                <strong>"{confirmDeleteModal.title}"</strong>؟
+                            </p>
+                            <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+                                لن يمكنك التراجع عن هذا الإجراء وسيتم حذف كافة السجلات المرتبطة به.
+                            </p>
+                        </div>
+                        <div className="pr-modal-footer" style={{ justifyContent: 'center', gap: 12 }}>
+                            <button type="button" className="pr-btn-secondary" onClick={() => setConfirmDeleteModal({ open: false, type: '', id: null, title: '' })}>
+                                إلغاء
+                            </button>
+                            <button
+                                type="button"
+                                style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '0.6rem 1.4rem', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}
+                                onClick={handleExecuteDelete}
+                            >
+                                نعم، احذف
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -1535,7 +1718,7 @@ const PointsAndRewards = () => {
                                     إلغاء
                                 </button>
                                 <button type="submit" className="pr-action-btn-green">
-                                    إضافة السؤال
+                                    {editingQuestion ? 'تحديث السؤال' : 'إضافة السؤال'}
                                 </button>
                             </div>
                         </form>
@@ -1544,6 +1727,11 @@ const PointsAndRewards = () => {
             )}
         </div>
     );
+};
+
+const PointsAndRewards = () => {
+    const { isMobile } = useDeviceType();
+    return isMobile ? <MobilePointsAndRewards /> : <DesktopPointsAndRewards />;
 };
 
 export default PointsAndRewards;

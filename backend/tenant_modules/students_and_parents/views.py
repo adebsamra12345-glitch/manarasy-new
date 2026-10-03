@@ -12,26 +12,6 @@ from .models import Student, StudentEnrollment, StudentRegistrationRequest, Stud
 from .utils import resolve_stage_and_part, check_student_project_uniqueness
 from .services import create_or_update_student_user
 
-def _get_requester_profile_helper(req, db):
-    import jwt as _jwt
-    auth = req.headers.get('Authorization') or req.META.get('HTTP_AUTHORIZATION', '')
-    if not auth.startswith('Bearer '):
-        return None, JsonResponse({'status': 'error', 'message': 'التوثيق مطلوب'}, status=401)
-    token = auth.split(' ', 1)[1]
-    try:
-        secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
-        payload = _jwt.decode(token, secret, algorithms=['HS256'])
-    except Exception:
-        return None, JsonResponse({'status': 'error', 'message': 'رمز التوثيق غير صالح أو منتهي الصلاحية'}, status=401)
-    user_id = payload.get('user_id')
-    if not user_id:
-        return None, JsonResponse({'status': 'error', 'message': 'بيانات التوثيق ناقصة'}, status=401)
-    try:
-        profile = UserProfile.objects.using(db).select_related('user').get(user__id=user_id)
-    except UserProfile.DoesNotExist:
-        return None, JsonResponse({'status': 'error', 'message': 'الملف الشخصي غير موجود'}, status=404)
-    return profile, None
-
 def parse_body(request):
     if not request.body:
         return {}
@@ -1194,9 +1174,10 @@ def approve_student_registration_request_view(request, request_id):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
     db_name = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db_name)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     roles = profile.get_roles() if profile else []
     if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
@@ -1313,9 +1294,10 @@ def reject_student_registration_request_view(request, request_id):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
     db_name = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db_name)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     roles = profile.get_roles() if profile else []
     if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
@@ -1377,9 +1359,10 @@ def approve_student_deletion_request_view(request, request_id):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
     db_name = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db_name)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     roles = profile.get_roles() if profile else []
     if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
@@ -1446,9 +1429,10 @@ def reject_student_deletion_request_view(request, request_id):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
     db_name = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db_name)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     roles = profile.get_roles() if profile else []
     if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:
@@ -1516,9 +1500,10 @@ def bulk_approve_student_requests_view(request):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
     db_name = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db_name)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     roles = profile.get_roles() if profile else []
     if 'TENANT_ADMIN' not in roles and 'CENTER_MANAGER' not in roles:

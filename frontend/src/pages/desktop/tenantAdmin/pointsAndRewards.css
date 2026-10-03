@@ -103,13 +103,14 @@
     justify-content: flex-start;
     gap: 0.5rem;
     background: #ffffff;
-    padding: 0.45rem;
+    padding: 0.5rem;
     border-radius: 14px;
     border: 1px solid var(--border-color, #e8ede8);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
     margin-bottom: 1.5rem;
-    overflow-x: auto;
-    scrollbar-width: thin;
+    flex-wrap: wrap;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .pr-nav-tab-item,

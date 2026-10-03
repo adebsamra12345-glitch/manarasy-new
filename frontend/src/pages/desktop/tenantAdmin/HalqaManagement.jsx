@@ -38,6 +38,7 @@ const HalqaManagement = () => {
     const [centers, setCenters] = useState([]);
     const [projects, setProjects] = useState([]);
     const [teachers, setTeachers] = useState([]);
+    const [eligibleTeachers, setEligibleTeachers] = useState([]);
 
     // Add / Edit Modal State
     const [modalMode, setModalMode] = useState('add'); // 'add' | 'edit'
@@ -108,22 +109,25 @@ const HalqaManagement = () => {
 
     const loadDropdownData = async () => {
         try {
-            const [centersRes, projectsRes, teachersRes] = await Promise.all([
+            const [centersRes, projectsRes, teachersRes, eligibleTeachersRes] = await Promise.all([
                 getCentersList().catch(async () => {
                     const dash = await getMosqueAdminDashboardData('all').catch(() => null);
                     return { data: dash?.data?.centers || [] };
                 }),
                 getProjects().catch(() => ({ data: [] })),
-                getTeachers().catch(() => ({ data: [] }))
+                getTeachers().catch(() => ({ data: [] })),
+                getTeachers({ eligible_for_circle: true }).catch(() => ({ data: [] }))
             ]);
 
             const loadedCenters = centersRes?.data || centersRes || [];
             const loadedProjects = projectsRes?.data || projectsRes || [];
             const loadedTeachers = teachersRes?.data || teachersRes || [];
+            const loadedEligible = eligibleTeachersRes?.data || eligibleTeachersRes || [];
 
             setCenters(Array.isArray(loadedCenters) ? loadedCenters : []);
             setProjects(Array.isArray(loadedProjects) ? loadedProjects : []);
             setTeachers(Array.isArray(loadedTeachers) ? loadedTeachers : []);
+            setEligibleTeachers(Array.isArray(loadedEligible) ? loadedEligible : []);
         } catch (err) {
             console.error('Error loading dropdowns for Halaqa modal:', err);
         }
@@ -272,12 +276,27 @@ const HalqaManagement = () => {
         }
     };
 
-    // Filter teachers based on selected center_id
-    const filteredTeachers = teachers.filter(t => {
+    // Filter teachers based on selected center_id and eligibility
+    const filteredTeachers = eligibleTeachers.filter(t => {
         if (!formData.center_id) return true;
         const teacherCenterId = t.center?.id || t.center_id || t.center;
-        return !teacherCenterId || String(teacherCenterId) === String(formData.center_id);
+        return String(teacherCenterId) === String(formData.center_id);
     });
+    
+    // In edit mode, if the currently assigned teacher is missing from the eligible list, append them so they can be kept
+    if (modalMode === 'edit' && formData.teacher_id) {
+        const hasCurrentTeacher = filteredTeachers.some(t => String(t.id || t.user_id) === String(formData.teacher_id));
+        if (!hasCurrentTeacher) {
+            const currentTeacherObj = teachers.find(t => String(t.id || t.user_id) === String(formData.teacher_id));
+            if (currentTeacherObj) {
+                // Ensure they belong to the center
+                const tCenterId = currentTeacherObj.center?.id || currentTeacherObj.center_id || currentTeacherObj.center;
+                if (String(tCenterId) === String(formData.center_id) || !formData.center_id) {
+                    filteredTeachers.push(currentTeacherObj);
+                }
+            }
+        }
+    }
 
     // Filter halaqat search
     const filteredRings = rings.filter(r => {

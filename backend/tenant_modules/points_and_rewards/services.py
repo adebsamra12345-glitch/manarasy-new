@@ -27,7 +27,7 @@ class PointsService:
                         "closed_by": "CENTER",
                         "message": f"متجر المكافآت مغلق حالياً من قبل إدارة المركز ({center.name})"
                     }
-            except Exception:
+            except Center.DoesNotExist:
                 pass
 
         # 2. فحص إعداد المسجد / التينانت
@@ -58,7 +58,7 @@ class PointsService:
 
         with transaction.atomic(using=db_name):
             try:
-                student = Student.objects.using(db_name).select_for_update().get(id=student_id)
+                student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=student_id)
             except Student.DoesNotExist:
                 raise ValueError("الطالب المحدد غير موجود")
 
@@ -110,7 +110,7 @@ class PointsService:
 
         with transaction.atomic(using=db_name):
             try:
-                student = Student.objects.using(db_name).select_for_update().get(id=student_id)
+                student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=student_id)
             except Student.DoesNotExist:
                 raise ValueError("الطالب المحدد غير موجود")
 
@@ -171,29 +171,36 @@ class PointsService:
         if not store_status["is_open"]:
             raise ValueError(store_status["message"])
 
-        try:
-            reward = Reward.objects.using(db_name).get(id=reward_id)
-        except Reward.DoesNotExist:
-            raise ValueError("المكافأة المحددة غير موجودة")
+        with transaction.atomic(using=db_name):
+            try:
+                reward = Reward.objects.using(db_name).select_for_update().get(id=reward_id)
+            except Reward.DoesNotExist:
+                raise ValueError("المكافأة المحددة غير موجودة")
 
-        if not reward.is_active:
-            raise ValueError("هذه المكافأة غير متاحة حالياً")
+            if not reward.is_active:
+                raise ValueError("هذه المكافأة غير متاحة حالياً")
 
-        if reward.stock_quantity != -1 and reward.stock_quantity <= 0:
-            raise ValueError("نفدت الكمية المتاحة من هذه المكافأة")
+            # Check real available stock considering PENDING claims to avoid overbooking
+            pending_count = RewardClaim.objects.using(db_name).filter(
+                reward=reward, status='PENDING'
+            ).count()
+            available_stock = reward.stock_quantity - pending_count
 
-        if student.points < reward.points_cost:
-            raise ValueError(f"رصيد الطالب غير كافٍ ({student.points} نقطة)، والمطلوب {reward.points_cost} نقطة")
+            if available_stock <= 0:
+                raise ValueError("نفدت الكمية المتاحة من هذه المكافأة (أو تم حجزها لطلبات سابقة)")
 
-        # إنشاء الطلب بحالة قيد الانتظار دون خصم نقاط
-        claim = RewardClaim.objects.using(db_name).create(
-            student=student,
-            reward=reward,
-            points_spent=reward.points_cost,
-            status='PENDING',
-            notes=notes.strip() if notes else None,
-            processed_by=None
-        )
+            if student.points < reward.points_cost:
+                raise ValueError(f"رصيد الطالب غير كافٍ ({student.points} نقطة)، والمطلوب {reward.points_cost} نقطة")
+
+            # إنشاء الطلب بحالة قيد الانتظار دون خصم نقاط
+            claim = RewardClaim.objects.using(db_name).create(
+                student=student,
+                reward=reward,
+                points_spent=reward.points_cost,
+                status='PENDING',
+                notes=notes.strip() if notes else None,
+                processed_by=None
+            )
 
         # إرسال إشعار للمسؤول المختص / الطالب
         try:
@@ -231,20 +238,20 @@ class PointsService:
         """
         with transaction.atomic(using=db_name):
             try:
-                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student', 'reward').get(id=claim_id)
+                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student__halaqa__center', 'reward').get(id=claim_id)
             except RewardClaim.DoesNotExist:
                 raise ValueError("طلب المكافأة غير موجود")
 
             if claim.status not in ['PENDING']:
                 raise ValueError(f"لا يمكن الموافقة على طلب بحالته الحالية ({claim.get_status_display()})")
 
-            student = Student.objects.using(db_name).select_for_update().get(id=claim.student_id)
+            student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=claim.student_id)
             reward = Reward.objects.using(db_name).select_for_update().get(id=claim.reward_id)
 
             if student.points < claim.points_spent:
                 raise ValueError(f"رصيد الطالب الحالي ({student.points} نقطة) غير كافٍ لإتمام الموافقة ({claim.points_spent} نقطة)")
 
-            if reward.stock_quantity != -1 and reward.stock_quantity <= 0:
+            if reward.stock_quantity <= 0:
                 raise ValueError("المخزون المتاح من هذه المكافأة قد نفد")
 
             # خصم النقاط
@@ -306,7 +313,7 @@ class PointsService:
         """
         with transaction.atomic(using=db_name):
             try:
-                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student', 'reward').get(id=claim_id)
+                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student__halaqa__center', 'reward').get(id=claim_id)
             except RewardClaim.DoesNotExist:
                 raise ValueError("طلب المكافأة غير موجود")
 
@@ -347,9 +354,23 @@ class PointsService:
         تسليم المكافأة للطالب (DELIVERED).
         إذا كان الطلب ما يزال PENDING يتم تنفيذ الموافقة والخصم أولاً ثم التحويل إلى DELIVERED.
         """
+        # Pre-check status without locking to handle PENDING -> APPROVED transition
+        # outside of the DELIVERED lock boundary (prevent nested locks/transactions queueing)
+        try:
+            initial_status = RewardClaim.objects.using(db_name).values_list('status', flat=True).get(id=claim_id)
+        except RewardClaim.DoesNotExist:
+            raise ValueError("طلب المكافأة غير موجود")
+
+        if initial_status == 'REJECTED':
+            raise ValueError("لا يمكن تسليم طلب مرفوض")
+
+        if initial_status == 'PENDING':
+            # Execute approval first (opens its own transaction and locks appropriately)
+            PointsService.approve_reward_claim(db_name, claim_id, reviewed_by, admin_notes)
+
         with transaction.atomic(using=db_name):
             try:
-                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student', 'reward').get(id=claim_id)
+                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student__halaqa__center', 'reward').get(id=claim_id)
             except RewardClaim.DoesNotExist:
                 raise ValueError("طلب المكافأة غير موجود")
 
@@ -357,9 +378,7 @@ class PointsService:
                 raise ValueError("لا يمكن تسليم طلب مرفوض")
 
             if claim.status == 'PENDING':
-                # تنفيذ الخصم أولاً
-                PointsService.approve_reward_claim(db_name, claim_id, reviewed_by, admin_notes)
-                claim.refresh_from_db(using=db_name)
+                raise ValueError("عذراً، الطلب لا يزال قيد الانتظار ولم تتم الموافقة عليه.")
 
             claim.status = 'DELIVERED'
             if admin_notes:
@@ -394,7 +413,7 @@ class PointsService:
         """
         with transaction.atomic(using=db_name):
             try:
-                student = Student.objects.using(db_name).select_for_update().get(id=student_id)
+                student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=student_id)
             except Student.DoesNotExist:
                 raise ValueError("الطالب غير موجود")
 
@@ -406,7 +425,7 @@ class PointsService:
             if not reward.is_active:
                 raise ValueError("هذه المكافأة غير مفعلة حالياً")
 
-            if reward.stock_quantity != -1 and reward.stock_quantity <= 0:
+            if reward.stock_quantity <= 0:
                 raise ValueError("نفدت الكمية المتاحة من هذه المكافأة")
 
             if student.points < reward.points_cost:

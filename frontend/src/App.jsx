@@ -191,7 +191,7 @@ function App() {
                                 <Route path="reports" element={<AdminReports />} />
                                 <Route path="reports/student-activity/:studentId" element={<StudentActivityPage />} />
                                 <Route path="students/:studentId/activity" element={<StudentActivityPage />} />
-                                <Route path="settings" element={<PlaceholderView title="الإعدادات" />} />
+                                <Route path="settings" element={<Navigate to="/center-manager/dashboard" replace />} />
                                 <Route path="profile" element={<ProfilePage />} />
                             </Route>
 

@@ -26,26 +26,23 @@ from .services import PointsService
 logger = logging.getLogger(__name__)
 
 
-def _get_requester_profile_helper(req, db):
-    import jwt as _jwt
-    auth = req.headers.get('Authorization') or req.META.get('HTTP_AUTHORIZATION', '')
-    if not auth.startswith('Bearer '):
-        return None, JsonResponse({'status': 'error', 'message': 'التوثيق مطلوب'}, status=401)
-    token = auth.split(' ', 1)[1]
-    try:
-        secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
-        payload = _jwt.decode(token, secret, algorithms=['HS256'])
-    except Exception:
-        return None, JsonResponse({'status': 'error', 'message': 'رمز التوثيق غير صالح أو منتهي الصلاحية'}, status=401)
-    user_id = payload.get('user_id')
-    if not user_id:
-        return None, JsonResponse({'status': 'error', 'message': 'بيانات التوثيق ناقصة'}, status=401)
-    try:
-        profile = UserProfile.objects.using(db).select_related('user').get(user__id=user_id)
-    except UserProfile.DoesNotExist:
-        return None, JsonResponse({'status': 'error', 'message': 'الملف الشخصي غير موجود'}, status=404)
-    return profile, None
+import requests
+from django.http import HttpResponse
 
+def image_proxy_view(request):
+    url = request.GET.get('url')
+    if not url:
+        return HttpResponse("Missing url parameter", status=400)
+    try:
+        r = requests.get(url, stream=True, timeout=5)
+        content_type = r.headers.get('Content-Type', 'image/jpeg')
+        if not content_type.startswith('image/'):
+            content_type = 'image/jpeg'
+        response = HttpResponse(r.raw, content_type=content_type)
+        response['Cache-Control'] = 'public, max-age=86400'
+        return response
+    except Exception as e:
+        return HttpResponse(str(e), status=400)
 
 def get_tenant_db_and_obj(request):
     tenant_id = request.headers.get('Tenant-ID')
@@ -129,15 +126,16 @@ def student_points_list_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     search = request.GET.get('search', '').strip()
     center_id = request.GET.get('center_id')
     halaqa_id = request.GET.get('halaqa_id')
 
-    qs = Student.objects.using(db).select_related('halaqa', 'halaqa__center', 'parent').all()
+    qs = Student.objects.using(db).select_related('halaqa', 'halaqa__center').all()
 
     if profile.role == 'CENTER_MANAGER' and profile.center_id:
         qs = qs.filter(halaqa__center_id=profile.center_id)
@@ -183,9 +181,10 @@ def grant_bonus_points_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN', 'CENTER_MANAGER', 'TEACHER']:
         return JsonResponse({'status': 'error', 'message': 'ليس لديك صلاحية منح نقاط'}, status=403)
@@ -225,9 +224,10 @@ def points_transactions_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     student_id = request.GET.get('student_id')
     tx_type = request.GET.get('type')
@@ -272,9 +272,10 @@ def rewards_list_create_view(request):
     قائمة المكافآت وإضافة مكافأة جديدة
     """
     db, tenant_obj = get_tenant_db_and_obj(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if request.method == 'GET':
         qs = Reward.objects.using(db).all()
@@ -305,7 +306,7 @@ def rewards_list_create_view(request):
             data = parse_body(request)
             name = data.get('name', '').strip()
             points_cost = int(data.get('points_cost') or 0)
-            stock_quantity = int(data.get('stock_quantity') if data.get('stock_quantity') is not None else -1)
+            stock_quantity = int(data.get('stock_quantity') if data.get('stock_quantity') is not None else 0)
             description = data.get('description', '').strip()
             image = data.get('image', '').strip()
             center_id = data.get('center_id')
@@ -314,6 +315,8 @@ def rewards_list_create_view(request):
                 return JsonResponse({'status': 'error', 'message': 'اسم المكافأة مطلوب'}, status=400)
             if points_cost <= 0:
                 return JsonResponse({'status': 'error', 'message': 'يجب أن تكون قيمة النقاط أكبر من الصفر'}, status=400)
+            if stock_quantity < 0:
+                return JsonResponse({'status': 'error', 'message': 'لا يمكن أن يكون المخزون أقل من صفر'}, status=400)
 
             center = None
             if profile.role == 'CENTER_MANAGER' and profile.center_id:
@@ -354,9 +357,10 @@ def reward_detail_view(request, pk):
     تعديل، حذف، وتفعيل/تعطيل مكافأة
     """
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     try:
         reward = Reward.objects.using(db).get(id=pk)
@@ -391,7 +395,10 @@ def reward_detail_view(request, pk):
             if 'points_cost' in data:
                 reward.points_cost = int(data['points_cost'])
             if 'stock_quantity' in data:
-                reward.stock_quantity = int(data['stock_quantity'])
+                stock_val = int(data['stock_quantity'])
+                if stock_val < 0:
+                    return JsonResponse({'status': 'error', 'message': 'لا يمكن أن يكون المخزون أقل من صفر'}, status=400)
+                reward.stock_quantity = stock_val
             if 'is_active' in data:
                 reward.is_active = bool(data['is_active'])
             if 'image' in data:
@@ -418,9 +425,10 @@ def redeem_reward_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     try:
         data = parse_body(request)
@@ -461,9 +469,10 @@ def admin_claims_list_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     status_filter = request.GET.get('status')
     search = request.GET.get('search', '').strip()
@@ -538,9 +547,10 @@ def admin_claim_action_view(request, pk):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN', 'CENTER_MANAGER']:
         return JsonResponse({'status': 'error', 'message': 'غير مصرح لك بإدارة طلبات المكافآت'}, status=403)
@@ -599,9 +609,10 @@ def store_settings_view(request):
     عرض وتعديل إعدادات فتح وإغلاق متجر النقاط على مستويي المركز والمسجد
     """
     db, tenant_obj = get_tenant_db_and_obj(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if request.method == 'GET':
         mosque_status = bool(getattr(tenant_obj, 'is_rewards_store_enabled', True))
@@ -700,9 +711,10 @@ def student_portal_dashboard_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db, tenant_obj = get_tenant_db_and_obj(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     requested_student_id = request.GET.get('student_id')
     student, children_list, is_parent = resolve_student_for_user(db, profile, requested_student_id)
@@ -892,9 +904,10 @@ def student_portal_points_store_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db, tenant_obj = get_tenant_db_and_obj(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     requested_student_id = request.GET.get('student_id')
     student, children_list, is_parent = resolve_student_for_user(db, profile, requested_student_id)
@@ -917,7 +930,7 @@ def student_portal_points_store_view(request):
 
     catalog = []
     for r in rewards_qs:
-        is_in_stock = r.stock_quantity == -1 or r.stock_quantity > 0
+        is_in_stock = r.stock_quantity > 0
         can_afford = student.points >= r.points_cost
         catalog.append({
             'id': str(r.id),
@@ -980,9 +993,10 @@ def student_portal_claim_reward_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db, tenant_obj = get_tenant_db_and_obj(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     try:
         data = parse_body(request)
@@ -1025,9 +1039,10 @@ def competitions_list_create_view(request):
     قائمة المسابقات وإنشاء مسابقة جديدة
     """
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if request.method == 'GET':
         qs = Competition.objects.using(db).prefetch_related('questions', 'target_centers', 'target_halaqat').all()
@@ -1108,9 +1123,10 @@ def competition_detail_view(request, pk):
     تفاصيل مسابقة وتعديلها وحذفها مع كافة أسئلتها
     """
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     try:
         comp = Competition.objects.using(db).prefetch_related('questions', 'sections').get(id=pk)
@@ -1185,9 +1201,10 @@ def competition_questions_view(request, pk):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN', 'CENTER_MANAGER']:
         return JsonResponse({'status': 'error', 'message': 'غير مصرح بإضافة أسئلة'}, status=403)
@@ -1238,9 +1255,10 @@ def question_detail_view(request, pk):
     تعديل أو حذف سؤال
     """
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     if profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN', 'CENTER_MANAGER']:
         return JsonResponse({'status': 'error', 'message': 'غير مصرح'}, status=403)
@@ -1287,9 +1305,10 @@ def student_competitions_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     requested_student_id = request.GET.get('student_id')
     student, _, _ = resolve_student_for_user(db, profile, requested_student_id)
@@ -1337,9 +1356,10 @@ def student_start_competition_view(request, pk):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     student, _, _ = resolve_student_for_user(db, profile)
     if not student:
@@ -1403,9 +1423,10 @@ def student_submit_competition_view(request, pk):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     try:
         data = parse_body(request)
@@ -1521,9 +1542,10 @@ def student_portal_follow_up_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     requested_student_id = request.GET.get('student_id')
     student, children_list, is_parent = resolve_student_for_user(db, profile, requested_student_id)
@@ -1762,9 +1784,10 @@ def student_portal_notifications_view(request):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     from tenant_modules.centers_and_projects.models import SystemNotification
     from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
@@ -1816,9 +1839,10 @@ def student_portal_mark_notification_read_view(request, pk=None):
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
     db = get_tenant_db(request)
-    profile, err = _get_requester_profile_helper(request, db)
-    if err:
-        return err
+    db = getattr(request, 'db_name', 'default')
+    profile = getattr(request, 'profile', None)
+    if not profile:
+        return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
     from tenant_modules.centers_and_projects.models import SystemNotification
 

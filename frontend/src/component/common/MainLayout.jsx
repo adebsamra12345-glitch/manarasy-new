@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
+import LoadingScreen from './LoadingScreen';
 
 // Sidebars
 import TenantAdminSidebar from '../sideBar/TenantAdminSidebar';
@@ -40,7 +41,9 @@ const MainLayout = () => {
             {/* المحتوى الرئيسي */}
             <main className="main-content">
                 <MobileTopbar />
-                <Outlet />
+                <Suspense fallback={<LoadingScreen fullScreen={false} />}>
+                    <Outlet />
+                </Suspense>
             </main>
 
             {/* شريط التنقل السفلي — يُخفى على الحاسوب */}

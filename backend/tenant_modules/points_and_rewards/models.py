@@ -42,7 +42,7 @@ class Reward(models.Model):
     description = models.TextField(null=True, blank=True)
     image = models.TextField(null=True, blank=True, help_text="رابط الصورة أو كود الصورة")
     points_cost = models.PositiveIntegerField(default=50, help_text="عدد النقاط المطلوبة للاستبدال")
-    stock_quantity = models.IntegerField(default=-1, help_text="-1 تعني كمية غير محدودة، أو رقم يمثل المخزون المتاح")
+    stock_quantity = models.IntegerField(default=0, help_text="رقم يمثل المخزون المتاح")
     is_active = models.BooleanField(default=True)
     center = models.ForeignKey(Center, on_delete=models.SET_NULL, null=True, blank=True, related_name='rewards')
     created_by = models.ForeignKey(UserProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_rewards')
@@ -52,6 +52,9 @@ class Reward(models.Model):
     class Meta:
         db_table = 'rewards'
         ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(check=models.Q(stock_quantity__gte=0), name='reward_stock_non_negative')
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.points_cost} نقطة)"

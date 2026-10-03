@@ -138,7 +138,7 @@ def check_halaqa_permission(request, db_name, center=None):
         return False
 
 
-def validate_and_get_teacher(db_name, center, teacher_id=None, teacher_name=None):
+def validate_and_get_teacher(db_name, center, teacher_id=None, teacher_name=None, exclude_halaqa_id=None):
     """
     التحقق من أن المعلم ينتمي كمعلم نشط لنفس المركز المحدد
     """
@@ -177,6 +177,21 @@ def validate_and_get_teacher(db_name, center, teacher_id=None, teacher_name=None
         raise ValueError(f"عذراً، المعلم المحدد '{teacher_name or teacher_id}' غير موجود كمعلم نشط ينتمي لنفس المركز ({center.name})")
 
     display_name = f"{target_profile.user.first_name} {target_profile.user.last_name}".strip() or target_profile.user.username
+    
+    # Check max load/capacity constraint (e.g. 3 circles)
+    from .models import Halaqa
+    active_circles_qs = Halaqa.objects.using(db_name).filter(
+        teacher_name=display_name,
+        is_active=True,
+        deleted_at__isnull=True
+    )
+    if exclude_halaqa_id:
+        active_circles_qs = active_circles_qs.exclude(id=exclude_halaqa_id)
+        
+    MAX_CIRCLES = 3
+    if active_circles_qs.count() >= MAX_CIRCLES:
+        raise ValueError(f"عذراً، المعلم {display_name} وصل للحد الأقصى لعدد الحلقات المسموح بها ({MAX_CIRCLES}).")
+
     return target_profile, display_name
 
 
@@ -429,7 +444,8 @@ def halaqa_detail_view(request, pk):
                     db_name,
                     center,
                     teacher_id=data.get('teacher_id'),
-                    teacher_name=data.get('teacher_name', halaqa.teacher_name)
+                    teacher_name=data.get('teacher_name', halaqa.teacher_name),
+                    exclude_halaqa_id=halaqa.id
                 )
 
             if 'project_id' in data:

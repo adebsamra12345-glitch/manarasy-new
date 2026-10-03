@@ -31,7 +31,11 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
+        const url = error.config?.url || '';
+        const isAuthRequest = url.includes('/login') || url.includes('/token') || url.includes('/register');
+        const isOnLoginPage = typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
+
+        if (error.response?.status === 401 && !isAuthRequest && !isOnLoginPage) {
             // تسجيل الخروج تلقائياً عند انتهاء صلاحية التوكن
             localStorage.clear();
             window.location.href = '/login';

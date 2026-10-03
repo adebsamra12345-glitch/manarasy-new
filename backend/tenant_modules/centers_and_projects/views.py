@@ -448,8 +448,8 @@ def center_detail_view(request, pk):
                 "id": str(h.id),
                 "name": h.name,
                 "teacher_name": h.teacher_name or "غير محدد",
-                "max_students": h.max_students,
-                "students_count": h.students.count() if hasattr(h, 'students') else 0,
+                "max_students": getattr(h, 'max_students', None) or 20,
+                "students_count": h.students.using(db_name).count() if hasattr(h, 'students') else 0,
                 "is_active": h.is_active
             }
             for h in halaqat

@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { MagnifyingGlass, Funnel, UserCircle, Plus, CaretDown, MapPin, Bell, Check } from '@phosphor-icons/react';
-import { getUsers } from '../../../services/api/userService';
-import { getTenantList } from '../../../services/api/tenantService';
+import {
+    MagnifyingGlass, Funnel, UserCircle, Plus, CaretDown, MapPin, Bell, Check,
+    Eye, PencilSimple, Trash, Phone, Envelope, Clock, X, WarningCircle, ShieldCheck
+} from '@phosphor-icons/react';
+import { getUsers, deleteUser } from '../../../services/api/userService';
+import { getTenantList, getMosqueAdminDashboardData } from '../../../services/api/tenantService';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getMosqueAdminDashboardData } from '../../../services/api/tenantService';
 import CreateUserModal from './CreateUserModal';
+import './usersManagement.css';
 
 const UsersManagement = () => {
     const navigate = useNavigate();
@@ -18,6 +21,7 @@ const UsersManagement = () => {
     const [centers, setCenters] = useState([]);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
+    const [deleteModalState, setDeleteModalState] = useState({ open: false, user: null, loading: false });
 
     const currentUserName = localStorage.getItem('username');
     const todayDate = new Date();
@@ -75,8 +79,19 @@ const UsersManagement = () => {
         fetchUsers();
     };
 
-    const handleRoleFilter = (e) => {
-        setSelectedRole(e.target.value);
+    const handleConfirmDelete = async () => {
+        if (!deleteModalState.user) return;
+        setDeleteModalState(prev => ({ ...prev, loading: true }));
+        try {
+            await deleteUser(deleteModalState.user.id);
+            setUsers(prev => prev.filter(u => u.id !== deleteModalState.user.id));
+            showToast(`تم حذف حساب المستخدم (${deleteModalState.user.first_name || deleteModalState.user.username}) بنجاح`);
+            setDeleteModalState({ open: false, user: null, loading: false });
+        } catch (err) {
+            console.error("Error deleting user:", err);
+            alert(err.response?.data?.message || err.message || 'فشل حذف المستخدم');
+            setDeleteModalState(prev => ({ ...prev, loading: false }));
+        }
     };
 
     const getRoleName = (role) => {
@@ -106,9 +121,9 @@ const UsersManagement = () => {
 
     const getStatusBadge = (isActive) => {
         if (isActive) {
-            return <span style={{ background: '#7cb342', color: '#fff', padding: '0.3rem 1.2rem', borderRadius: '4px', fontSize: '0.85rem' }}>نشط</span>;
+            return <span style={{ background: '#7cb342', color: '#fff', padding: '0.25rem 0.8rem', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 700 }}>نشط</span>;
         }
-        return <span style={{ background: '#e53935', color: '#fff', padding: '0.3rem 1.2rem', borderRadius: '4px', fontSize: '0.85rem' }}>معطل</span>;
+        return <span style={{ background: '#e53935', color: '#fff', padding: '0.25rem 0.8rem', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 700 }}>معطل</span>;
     };
 
     const filteredUsers = users.filter(user => {
@@ -123,21 +138,14 @@ const UsersManagement = () => {
     });
 
     return (
-        <div className="dashboard-container" style={{ direction: 'rtl' }}>
+        <div className="users-management-container">
             {/* Header matches Dashboard */}
-            <div className="dashboard-header" style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '1.25rem',
-                marginBottom: '2rem'
-            }}>
+            <div className="users-header-row">
                 <div className="greeting">
-                    <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: '#133315', margin: 0, marginBottom: '0.4rem', letterSpacing: '-0.3px' }}>
+                    <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#133315', margin: 0, marginBottom: '0.4rem', letterSpacing: '-0.3px' }}>
                         السلام عليكم، أ. {currentUserName}
                     </h1>
-                    <p style={{ color: '#718096', fontSize: '0.95rem', margin: 0, fontWeight: 500 }}>
+                    <p style={{ color: '#718096', fontSize: '0.9rem', margin: 0, fontWeight: 500 }}>
                         {defaultDateStr}
                     </p>
                 </div>
@@ -190,12 +198,12 @@ const UsersManagement = () => {
                 </div>
             </div>
 
-            {/* Title & Actions */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <h2 style={{ fontSize: '2.2rem', color: '#133315', margin: 0, fontWeight: 'bold' }}>المستخدمون</h2>
+            {/* Toolbar: Search, Filter & Add Button */}
+            <div className="users-toolbar">
+                <div className="users-search-filter-group">
+                    <h2 style={{ fontSize: '1.8rem', color: '#133315', margin: 0, fontWeight: 'bold' }}>المستخدمون ({filteredUsers.length})</h2>
 
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '0.5rem 1rem', width: '300px', marginRight: '2rem' }}>
+                    <div className="users-search-input-wrap">
                         <MagnifyingGlass size={18} color="#a0aec0" style={{ position: 'absolute', left: '1rem' }} />
                         <input
                             type="text"
@@ -206,32 +214,43 @@ const UsersManagement = () => {
                         />
                     </div>
 
-                    <button style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.5rem 0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#718096' }}>
-                        <Funnel size={20} />
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0.4rem 0.8rem' }}>
+                        <select
+                            value={selectedRole}
+                            onChange={(e) => setSelectedRole(e.target.value)}
+                            style={{ border: 'none', background: 'transparent', outline: 'none', color: '#4a5568', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer' }}
+                        >
+                            <option value="all">كافة الأدوار</option>
+                            <option value="TENANT_ADMIN">مدير النظام</option>
+                            <option value="CENTER_MANAGER">مدير مركز</option>
+                            <option value="TEACHER">معلم</option>
+                            <option value="STUDENT">طالب</option>
+                        </select>
+                    </div>
                 </div>
 
                 <button
+                    className="users-btn-add"
                     onClick={() => setIsCreateModalOpen(true)}
-                    style={{ background: '#558b2f', color: '#fff', border: 'none', padding: '0.6rem 1.5rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer' }}
+                    style={{ background: '#558b2f', color: '#fff', border: 'none', padding: '0.65rem 1.4rem', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.95rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 6px rgba(85, 139, 47, 0.25)' }}
                 >
-                    <Plus size={16} />
+                    <Plus size={18} weight="bold" />
                     إضافة مستخدم
                 </button>
             </div>
 
-            {/* Users Table */}
-            <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
+            {/* Desktop Table View (visible on screen > 768px) */}
+            <div className="users-desktop-table-card">
+                <table className="users-desktop-table">
                     <thead>
-                        <tr style={{ background: '#e2e8f0', color: '#4a5568', fontSize: '0.95rem' }}>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', width: '60px' }}>م</th>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', borderRight: '1px solid #cbd5e0' }}>اسم المستخدم</th>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', borderRight: '1px solid #cbd5e0' }}>البريد الإلكتروني</th>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', borderRight: '1px solid #cbd5e0', width: '150px' }}>الأدوار</th>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', borderRight: '1px solid #cbd5e0', width: '100px' }}>الحالة</th>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', borderRight: '1px solid #cbd5e0', width: '150px' }}>رقم الهاتف</th>
-                            <th style={{ padding: '1rem', borderBottom: '1px solid #cbd5e0', borderRight: '1px solid #cbd5e0', width: '180px' }}>أخر تسجيل دخول</th>
+                        <tr style={{ background: '#f8fafc', color: '#4a5568', fontSize: '0.9rem' }}>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', width: '50px' }}>م</th>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', textAlign: 'right' }}>اسم المستخدم</th>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0' }}>البريد الإلكتروني</th>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', width: '150px' }}>الأدوار</th>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', width: '90px' }}>الحالة</th>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', width: '130px' }}>رقم الهاتف</th>
+                            <th style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', width: '150px' }}>الإجراءات</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -245,54 +264,67 @@ const UsersManagement = () => {
                             </tr>
                         ) : (
                             filteredUsers.map((user, index) => {
-                                const formattedDate = new Date(user.created_at).toLocaleString('ar-EG', {
-                                    year: 'numeric', month: 'numeric', day: 'numeric',
-                                    hour: 'numeric', minute: 'numeric', hour12: true
-                                });
+                                const formattedDate = new Date(user.created_at).toLocaleDateString('ar-SA');
 
                                 return (
-                                    <tr key={user.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                        <td style={{ padding: '1rem', color: '#718096' }}>{index + 1}</td>
-                                        <td style={{ padding: '1rem 1.5rem 1rem 1rem', borderRight: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.8rem', justifyContent: 'flex-start' }}>
-                                            <div style={{ color: '#2b6cb0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => navigate(`${basePath}/users/${user.id}`)}>
-                                                <UserCircle size={28} />
+                                    <tr key={user.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '0.85rem', color: '#718096' }}>{index + 1}</td>
+                                        <td style={{ padding: '0.85rem 1rem', borderRight: '1px solid #f1f5f9', textAlign: 'right' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <div style={{ color: '#2b6cb0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => navigate(`${basePath}/users/${user.id}`)}>
+                                                    <UserCircle size={32} />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontWeight: '700', color: '#2d3748', cursor: 'pointer' }} onClick={() => navigate(`${basePath}/users/${user.id}`)}>
+                                                        {user.first_name} {user.last_name}
+                                                    </div>
+                                                    <div style={{ fontSize: '0.8rem', color: '#a0aec0' }}>@{user.username}</div>
+                                                </div>
                                             </div>
-                                            <span style={{ fontWeight: '600', color: '#2d3748', cursor: 'pointer' }} onClick={() => navigate(`${basePath}/users/${user.id}`)}>
-                                                {user.first_name} {user.last_name}
-                                            </span>
                                         </td>
-                                        <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0', color: '#718096' }}>{user.email || '—'}</td>
-                                        <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0' }}>
-                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                                        <td style={{ padding: '0.85rem', borderRight: '1px solid #f1f5f9', color: '#718096', fontSize: '0.9rem' }}>{user.email || '—'}</td>
+                                        <td style={{ padding: '0.85rem', borderRight: '1px solid #f1f5f9' }}>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center' }}>
                                                 {Array.from(new Set(Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : [user.role])).map((r) => {
                                                     const style = getRoleBadgeStyle(r);
                                                     return (
-                                                        <span
-                                                            key={r}
-                                                            style={{
-                                                                ...style,
-                                                                padding: '0.25rem 0.65rem',
-                                                                borderRadius: '12px',
-                                                                fontSize: '0.8rem',
-                                                                fontWeight: '600',
-                                                                whiteSpace: 'nowrap',
-                                                                display: 'inline-block'
-                                                            }}
-                                                        >
+                                                        <span key={r} style={{ ...style, padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
                                                             {getRoleName(r)}
                                                         </span>
                                                     );
                                                 })}
                                             </div>
                                         </td>
-                                        <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0' }}>
+                                        <td style={{ padding: '0.85rem', borderRight: '1px solid #f1f5f9' }}>
                                             {getStatusBadge(user.is_active)}
                                         </td>
-                                        <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0', color: '#a0aec0', fontSize: '0.9rem' }}>
+                                        <td style={{ padding: '0.85rem', borderRight: '1px solid #f1f5f9', color: '#4a5568', fontSize: '0.85rem' }}>
                                             {user.phone || '—'}
                                         </td>
-                                        <td style={{ padding: '1rem', borderRight: '1px solid #e2e8f0', color: '#a0aec0', fontSize: '0.85rem' }}>
-                                            {formattedDate}
+                                        <td style={{ padding: '0.85rem', borderRight: '1px solid #f1f5f9' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                                                <button
+                                                    onClick={() => navigate(`${basePath}/users/${user.id}`)}
+                                                    style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', padding: '0.35rem 0.6rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 600 }}
+                                                    title="عرض الملف"
+                                                >
+                                                    <Eye size={14} /> عرض
+                                                </button>
+                                                <button
+                                                    onClick={() => navigate(`${basePath}/users/${user.id}?edit=true`)}
+                                                    style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '0.35rem 0.6rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 600 }}
+                                                    title="تعديل"
+                                                >
+                                                    <PencilSimple size={14} /> تعديل
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteModalState({ open: true, user, loading: false })}
+                                                    style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.35rem 0.6rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 600 }}
+                                                    title="حذف"
+                                                >
+                                                    <Trash size={14} />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 );
@@ -301,6 +333,145 @@ const UsersManagement = () => {
                     </tbody>
                 </table>
             </div>
+
+            {/* Mobile Cards View (visible on screen <= 768px, NO horizontal scroll) */}
+            <div className="users-mobile-cards-wrap">
+                {loading ? (
+                    <div style={{ textAlign: 'center', padding: '3rem', color: '#558b2f' }}>جاري التحميل...</div>
+                ) : filteredUsers.length === 0 ? (
+                    <div style={{ background: '#fff', padding: '2rem', textAlign: 'center', borderRadius: '12px', color: '#718096' }}>
+                        لا يوجد مستخدمين لعرضهم
+                    </div>
+                ) : (
+                    filteredUsers.map((user) => {
+                        const initialLetter = user.first_name ? user.first_name.charAt(0) : (user.username ? user.username.charAt(0) : 'م');
+                        const roles = Array.from(new Set(Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : [user.role]));
+                        const formattedDate = user.created_at ? new Date(user.created_at).toLocaleDateString('ar-SA') : '—';
+
+                        return (
+                            <div key={user.id} className="user-mobile-card">
+                                <div className="user-card-top">
+                                    <div className="user-card-identity">
+                                        <div className="user-card-avatar" onClick={() => navigate(`${basePath}/users/${user.id}`)}>
+                                            {initialLetter}
+                                        </div>
+                                        <div className="user-card-names">
+                                            <h4 className="user-card-fullname" onClick={() => navigate(`${basePath}/users/${user.id}`)}>
+                                                {user.first_name} {user.last_name || ''}
+                                            </h4>
+                                            <span className="user-card-username">@{user.username}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        {getStatusBadge(user.is_active)}
+                                    </div>
+                                </div>
+
+                                <div className="user-card-roles">
+                                    {roles.map((r) => {
+                                        const style = getRoleBadgeStyle(r);
+                                        return (
+                                            <span key={r} style={{ ...style, padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                                {getRoleName(r)}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="user-card-meta-list">
+                                    {user.email && (
+                                        <div className="user-card-meta-item">
+                                            <Envelope size={15} color="#558b2f" />
+                                            <a href={`mailto:${user.email}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                                                {user.email}
+                                            </a>
+                                        </div>
+                                    )}
+                                    {user.phone && (
+                                        <div className="user-card-meta-item">
+                                            <Phone size={15} color="#558b2f" />
+                                            <a href={`tel:${user.phone}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                                                {user.phone}
+                                            </a>
+                                        </div>
+                                    )}
+                                    <div className="user-card-meta-item">
+                                        <Clock size={15} color="#718096" />
+                                        <span>تاريخ الانضمام: {formattedDate}</span>
+                                    </div>
+                                </div>
+
+                                <div className="user-card-actions">
+                                    <button
+                                        className="user-card-btn user-card-btn-view"
+                                        onClick={() => navigate(`${basePath}/users/${user.id}`)}
+                                    >
+                                        <Eye size={16} />
+                                        عرض
+                                    </button>
+                                    <button
+                                        className="user-card-btn user-card-btn-edit"
+                                        onClick={() => navigate(`${basePath}/users/${user.id}?edit=true`)}
+                                    >
+                                        <PencilSimple size={16} />
+                                        تعديل
+                                    </button>
+                                    <button
+                                        className="user-card-btn user-card-btn-delete"
+                                        onClick={() => setDeleteModalState({ open: true, user, loading: false })}
+                                    >
+                                        <Trash size={16} />
+                                        حذف
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+
+            {/* Delete Confirmation Modal */}
+            {deleteModalState.open && deleteModalState.user && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 10000,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+                }}>
+                    <div style={{
+                        background: '#fff', borderRadius: '16px', maxWidth: '420px', width: '100%',
+                        padding: '1.5rem', textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
+                    }}>
+                        <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem auto' }}>
+                            <WarningCircle size={32} weight="bold" />
+                        </div>
+                        <h3 style={{ margin: '0 0 0.5rem 0', color: '#111827', fontSize: '1.25rem', fontWeight: 800 }}>
+                            تأكيد حذف المستخدم
+                        </h3>
+                        <p style={{ color: '#4b5563', fontSize: '0.95rem', lineHeight: 1.5, margin: '0 0 1.5rem 0' }}>
+                            هل أنت متأكد من رغبتك في حذف حساب المستخدم <strong>{deleteModalState.user.first_name} {deleteModalState.user.last_name || ''}</strong> (<code>@{deleteModalState.user.username}</code>)؟ لا يمكن التراجع عن هذا الإجراء.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem' }}>
+                            <button
+                                type="button"
+                                disabled={deleteModalState.loading}
+                                onClick={() => setDeleteModalState({ open: false, user: null, loading: false })}
+                                style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                type="button"
+                                disabled={deleteModalState.loading}
+                                onClick={handleConfirmDelete}
+                                style={{ flex: 1, padding: '0.75rem', borderRadius: '10px', border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, cursor: deleteModalState.loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+                            >
+                                {deleteModalState.loading ? 'جاري الحذف...' : 'تأكيد الحذف'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {toastMessage && (
                 <div style={{
                     position: 'fixed',

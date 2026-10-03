@@ -31,15 +31,10 @@ import { getHalaqat, getMosqueAdminDashboardData } from '../../../services/api/t
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileTeacherAssignment from '../../mobile/tenantAdmin/MobileTeacherAssignment';
 
-const TeacherAssignment = () => {
+const DesktopTeacherAssignment = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileTeacherAssignment />;
-    }
 
     // Data States
     const [teachers, setTeachers] = useState([]);
@@ -2534,6 +2529,16 @@ const TeacherAssignment = () => {
             )}
         </div>
     );
+};
+
+const TeacherAssignment = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileTeacherAssignment />;
+    }
+
+    return <DesktopTeacherAssignment />;
 };
 
 export default TeacherAssignment;

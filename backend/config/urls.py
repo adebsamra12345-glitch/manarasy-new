@@ -23,6 +23,7 @@ api_urlpatterns = [
     path('recitation/', include('tenant_modules.recitation_and_sabr.urls')),
     path('reports/', include('tenant_modules.reports_and_certificates.urls')),
     path('points-and-rewards/', include('tenant_modules.points_and_rewards.urls')),
+    path('geodata/', include('core_geodata.urls')),
     path('', include('tenant_modules.points_and_rewards.urls')),
 ]
 

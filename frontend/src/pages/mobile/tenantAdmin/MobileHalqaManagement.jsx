@@ -22,6 +22,7 @@ const MobileHalqaManagement = () => {
     const [centers, setCenters] = useState([]);
     const [projects, setProjects] = useState([]);
     const [teachers, setTeachers] = useState([]);
+    const [eligibleTeachers, setEligibleTeachers] = useState([]);
 
     const [modalMode, setModalMode] = useState('add');
     const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -63,17 +64,19 @@ const MobileHalqaManagement = () => {
 
     const loadDropdownData = async () => {
         try {
-            const [centersRes, projectsRes, teachersRes] = await Promise.all([
+            const [centersRes, projectsRes, teachersRes, eligibleTeachersRes] = await Promise.all([
                 getCentersList().catch(async () => {
                     const dash = await getMosqueAdminDashboardData('all').catch(() => null);
                     return { data: dash?.data?.centers || [] };
                 }),
                 getProjects().catch(() => ({ data: [] })),
-                getTeachers().catch(() => ({ data: [] }))
+                getTeachers().catch(() => ({ data: [] })),
+                getTeachers({ eligible_for_circle: true }).catch(() => ({ data: [] }))
             ]);
             setCenters(Array.isArray(centersRes?.data) ? centersRes.data : []);
             setProjects(Array.isArray(projectsRes?.data) ? projectsRes.data : []);
             setTeachers(Array.isArray(teachersRes?.data) ? teachersRes.data : []);
+            setEligibleTeachers(Array.isArray(eligibleTeachersRes?.data) ? eligibleTeachersRes.data : []);
         } catch (err) {
             console.error(err);
         }
@@ -130,6 +133,21 @@ const MobileHalqaManagement = () => {
             setSubmitting(false);
             return;
         }
+        if (!formData.center_id) {
+            setModalError('يرجى اختيار المركز لتحديد المسجد أو المركز التابع له الحلقة');
+            setSubmitting(false);
+            return;
+        }
+        if (!formData.project_id) {
+            setModalError('المشروع حقل إلزامي. لا يمكن إنشاء أو تعديل أي حلقة دون اختيار مشروع.');
+            setSubmitting(false);
+            return;
+        }
+        if (!formData.teacher_id) {
+            setModalError('يرجى اختيار المعلم المسند إليه الحلقة');
+            setSubmitting(false);
+            return;
+        }
 
         try {
             const payload = {
@@ -179,11 +197,24 @@ const MobileHalqaManagement = () => {
         }
     };
 
-    const filteredTeachers = teachers.filter(t => {
+    const filteredTeachers = (modalMode === 'add' ? eligibleTeachers : teachers).filter(t => {
         if (!formData.center_id) return true;
         const teacherCenterId = t.center?.id || t.center_id || t.center;
-        return !teacherCenterId || String(teacherCenterId) === String(formData.center_id);
+        return String(teacherCenterId) === String(formData.center_id);
     });
+
+    if (modalMode === 'edit' && formData.teacher_id) {
+        const hasCurrentTeacher = filteredTeachers.some(t => String(t.id || t.user_id) === String(formData.teacher_id));
+        if (!hasCurrentTeacher) {
+            const currentTeacherObj = teachers.find(t => String(t.id || t.user_id) === String(formData.teacher_id));
+            if (currentTeacherObj) {
+                const tCenterId = currentTeacherObj.center?.id || currentTeacherObj.center_id || currentTeacherObj.center;
+                if (String(tCenterId) === String(formData.center_id) || !formData.center_id) {
+                    filteredTeachers.push(currentTeacherObj);
+                }
+            }
+        }
+    }
 
     const filteredRings = rings.filter(r => {
         const query = searchQuery.trim().toLowerCase();
@@ -302,7 +333,10 @@ const MobileHalqaManagement = () => {
                                 <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>المعلم</label>
                                 <select value={formData.teacher_id} onChange={(e) => setFormData({ ...formData, teacher_id: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd', background: '#fff' }}>
                                     <option value="">-- اختر --</option>
-                                    {filteredTeachers.map(t => <option key={t.id} value={t.id}>{t.full_name || t.username}</option>)}
+                                    {filteredTeachers.map(t => {
+                                        const teacherId = t.id || t.user_id;
+                                        return <option key={teacherId} value={teacherId}>{t.full_name || t.username}</option>;
+                                    })}
                                 </select>
                             </div>
                         </div>

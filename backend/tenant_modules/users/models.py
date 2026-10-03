@@ -60,15 +60,13 @@ class UserProfile(models.Model):
     def set_roles(self, role_list):
         if not role_list or not isinstance(role_list, list) or len(role_list) == 0:
             role_list = ['STUDENT']
-        seen = set()
-        clean_roles = [r for r in role_list if not (r in seen or seen.add(r))]
+        clean_roles = list(dict.fromkeys(role_list))
         self.roles = clean_roles
         self.role = clean_roles[0]
 
     def save(self, *args, **kwargs):
         if self.roles and isinstance(self.roles, list) and len(self.roles) > 0:
-            seen = set()
-            clean_roles = [r for r in self.roles if not (r in seen or seen.add(r))]
+            clean_roles = list(dict.fromkeys(self.roles))
             self.roles = clean_roles
             if self.role not in clean_roles:
                 self.role = clean_roles[0]

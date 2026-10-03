@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'rest_framework',
     # Master apps (core_system)
     'core_system.tenants',
+    'core_geodata',
     'core_system.subscriptions',
     'core_system.payments',
     'core_system.backups',
@@ -80,6 +81,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core_system.middleware.TenantJWTAuthMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -139,6 +141,13 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+    }
+}
 
 LANGUAGE_CODE = 'en-us'
 

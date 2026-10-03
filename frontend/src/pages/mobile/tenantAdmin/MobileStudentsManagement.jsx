@@ -31,9 +31,16 @@ const MobileStudentsManagement = () => {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [studentToDelete, setStudentToDelete] = useState(null);
 
+    const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const [selectedStudentDetails, setSelectedStudentDetails] = useState(null);
+
     const initialFormData = {
         full_name: '', gender: 'M', national_id: '',
-        parent_phone: '', halaqa_id: ''
+        parent_phone: '', halaqa_id: '',
+        birth_date: '', registration_number: '', current_residence: '',
+        is_orphan: false, has_special_needs: false, special_needs_notes: '',
+        parent_name: '', mother_name: '', mother_phone: '',
+        income_level: '', general_notes: '', project_id: '', stage_id: '', part_id: ''
     };
     const [formData, setFormData] = useState(initialFormData);
 
@@ -76,7 +83,21 @@ const MobileStudentsManagement = () => {
             gender: student.gender || 'M',
             national_id: student.national_id || '',
             parent_phone: student.parent_phone || '',
-            halaqa_id: student.halaqa_id || ''
+            halaqa_id: student.halaqa_id || '',
+            birth_date: student.birth_date || '',
+            registration_number: student.registration_number || '',
+            current_residence: student.current_residence || '',
+            is_orphan: student.is_orphan || false,
+            has_special_needs: student.has_special_needs || false,
+            special_needs_notes: student.special_needs_notes || '',
+            parent_name: student.parent_name || '',
+            mother_name: student.mother_name || '',
+            mother_phone: student.mother_phone || '',
+            income_level: student.income_level || '',
+            general_notes: student.general_notes || '',
+            project_id: student.project_id || '',
+            stage_id: student.stage_id || '',
+            part_id: student.part_id || ''
         });
         setModalError('');
         setIsAddEditModalOpen(true);
@@ -85,6 +106,11 @@ const MobileStudentsManagement = () => {
     const handleOpenDeleteModal = (student) => {
         setStudentToDelete(student);
         setIsDeleteModalOpen(true);
+    };
+
+    const handleOpenDetailsModal = (student) => {
+        setSelectedStudentDetails(student);
+        setIsDetailsModalOpen(true);
     };
 
     const handleSaveStudent = async () => {
@@ -184,6 +210,7 @@ const MobileStudentsManagement = () => {
                                     <div>الجوال: <span dir="ltr">{student.parent_phone || 'لا يوجد'}</span></div>
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button onClick={() => handleOpenDetailsModal(student)} style={{ flex: 1, padding: '0.5rem', background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: '8px', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem', fontWeight: 'bold' }}><Users size={16} /> التفاصيل</button>
                                     <button onClick={() => handleOpenEditModal(student)} style={{ flex: 1, padding: '0.5rem', background: '#f1f8e9', border: '1px solid #a5d6a7', borderRadius: '8px', color: '#2e7d32', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem', fontWeight: 'bold' }}><PencilSimple size={16} /> تعديل</button>
                                     <button onClick={() => handleOpenDeleteModal(student)} style={{ flex: 1, padding: '0.5rem', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: '8px', color: '#c62828', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem', fontWeight: 'bold' }}><Trash size={16} /> حذف</button>
                                 </div>
@@ -206,9 +233,56 @@ const MobileStudentsManagement = () => {
                                 <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>الاسم الكامل</label>
                                 <input type="text" value={formData.full_name} onChange={(e) => setFormData({ ...formData, full_name: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
                             </div>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>الجنس</label>
+                                    <select value={formData.gender} onChange={(e) => setFormData({ ...formData, gender: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd', background: '#fff' }}>
+                                        <option value="M">ذكر</option>
+                                        <option value="F">أنثى</option>
+                                    </select>
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>تاريخ الميلاد</label>
+                                    <input type="date" value={formData.birth_date || ''} onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>رقم الهوية</label>
+                                    <input type="text" value={formData.national_id} onChange={(e) => setFormData({ ...formData, national_id: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>رقم التسجيل</label>
+                                    <input type="text" value={formData.registration_number || ''} onChange={(e) => setFormData({ ...formData, registration_number: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>هاتف الأب</label>
+                                    <input type="text" value={formData.parent_phone} onChange={(e) => setFormData({ ...formData, parent_phone: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>هاتف الأم</label>
+                                    <input type="text" value={formData.mother_phone || ''} onChange={(e) => setFormData({ ...formData, mother_phone: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                </div>
+                            </div>
                             <div>
-                                <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>رقم الهوية</label>
-                                <input type="text" value={formData.national_id} onChange={(e) => setFormData({ ...formData, national_id: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>مكان السكن</label>
+                                <input type="text" value={formData.current_residence || ''} onChange={(e) => setFormData({ ...formData, current_residence: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <input type="checkbox" checked={formData.is_orphan || false} onChange={(e) => setFormData({ ...formData, is_orphan: e.target.checked })} style={{ width: '18px', height: '18px', accentColor: '#133315' }} />
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', cursor: 'pointer' }}>يتيم</label>
+                                </div>
+                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <input type="checkbox" checked={formData.has_special_needs || false} onChange={(e) => setFormData({ ...formData, has_special_needs: e.target.checked })} style={{ width: '18px', height: '18px', accentColor: '#133315' }} />
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', cursor: 'pointer' }}>احتياجات خاصة</label>
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>ملاحظات عامة</label>
+                                <textarea value={formData.general_notes || ''} onChange={(e) => setFormData({ ...formData, general_notes: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd', minHeight: '80px' }}></textarea>
                             </div>
                             <div>
                                 <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>الحلقة</label>
@@ -234,6 +308,37 @@ const MobileStudentsManagement = () => {
                         <div style={{ display: 'flex', gap: '0.8rem' }}>
                             <button onClick={() => setIsDeleteModalOpen(false)} style={{ flex: 1, padding: '0.8rem', background: '#f5f5f5', color: '#333', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>إلغاء</button>
                             <button onClick={handleConfirmDelete} disabled={submitting} style={{ flex: 1, padding: '0.8rem', background: '#c62828', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>تأكيد الحذف</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isDetailsModalOpen && selectedStudentDetails && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'flex-end' }}>
+                    <div style={{ background: '#fff', width: '100%', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '1.5rem', maxHeight: '85vh', overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid #eee', paddingBottom: '1rem' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#133315' }}>تفاصيل الطالب</h3>
+                            <button onClick={() => setIsDetailsModalOpen(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>الاسم الكامل:</span> <span>{selectedStudentDetails.full_name}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>الجنس:</span> <span>{selectedStudentDetails.gender === 'M' ? 'ذكر' : 'أنثى'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>رقم الهوية:</span> <span>{selectedStudentDetails.national_id}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>رقم التسجيل:</span> <span>{selectedStudentDetails.registration_number || 'غير متوفر'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>تاريخ الميلاد:</span> <span>{selectedStudentDetails.birth_date || 'غير متوفر'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>هاتف الأب:</span> <span>{selectedStudentDetails.parent_phone}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>هاتف الأم:</span> <span>{selectedStudentDetails.mother_phone || 'غير متوفر'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>مكان السكن:</span> <span>{selectedStudentDetails.current_residence || 'غير متوفر'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>يتيم:</span> <span>{selectedStudentDetails.is_orphan ? 'نعم' : 'لا'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>احتياجات خاصة:</span> <span>{selectedStudentDetails.has_special_needs ? 'نعم' : 'لا'}</span></div>
+                            {selectedStudentDetails.general_notes && (
+                                <div>
+                                    <span style={{ color: '#666', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>ملاحظات عامة:</span>
+                                    <p style={{ margin: 0, padding: '0.8rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.9rem' }}>{selectedStudentDetails.general_notes}</p>
+                                </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>الحلقة:</span> <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '0.2rem 0.5rem', borderRadius: '8px', fontSize: '0.85rem' }}>{selectedStudentDetails.halaqa_name || 'بدون حلقة'}</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#666', fontWeight: 'bold' }}>النقاط:</span> <span style={{ color: '#f57c00', fontWeight: 'bold' }}>{selectedStudentDetails.points || 0}</span></div>
                         </div>
                     </div>
                 </div>

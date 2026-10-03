@@ -72,15 +72,91 @@ const MobileAdminReports = () => {
 
     const filterOptions = reportData?.filter_options || { centers: [], projects: [] };
 
+    const STAT_LABELS = {
+        total_pages: 'إجمالي الصفحات',
+        avg_attendance: 'متوسط نسبة الحضور',
+        total_sessions: 'أيام الدوام المنفذة',
+        total_centers: 'عدد المراكز',
+        total_managers: 'عدد المدراء',
+        total_teachers: 'إجمالي المعلمين',
+        active_teachers: 'المعلمون النشطون',
+        total_students: 'إجمالي الطلاب',
+        avg_attendance_rate: 'متوسط نسبة الحضور',
+        total_pages_memorized: 'الصفحات المحفوظة',
+        overall_score: 'التقييم الكلي',
+        attendance_index: 'مؤشر الحضور',
+        memorization_index: 'مؤشر الحفظ',
+        discipline_index: 'مؤشر الانضباط',
+        top_students_list: 'الطلاب المتميزون',
+    };
+
+    const handleExportPDF = () => {
+        if (!reportData) return;
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            alert('يرجى السماح بالنوافذ المنبثقة لتصدير التقرير');
+            return;
+        }
+        const title = `تقرير ${tabs.find(t => t.id === activeTab)?.label || 'المنصة'}`;
+        const itemsRows = (reportData.items || []).slice(0, 100).map((it, idx) => {
+            const name = it.halaqa_name || it.center_name || it.name || it.student_name || it.teacher_name || it.project_name || `سجل ${idx + 1}`;
+            const secondary = it.teacher || it.manager || it.students_count ? `${it.students_count || 0} طالب` : '';
+            const rate = it.rating || it.status || it.attendance_rate || '';
+            return `<tr><td style="padding: 8px; border: 1px solid #ddd;">${idx + 1}</td><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${name}</td><td style="padding: 8px; border: 1px solid #ddd;">${secondary}</td><td style="padding: 8px; border: 1px solid #ddd; color: #2e7d32;">${rate}</td></tr>`;
+        }).join('');
+
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html dir="rtl" lang="ar">
+            <head>
+                <meta charset="utf-8">
+                <title>${title}</title>
+                <style>
+                    body { font-family: 'Cairo', 'Tajawal', Tahoma, sans-serif; padding: 24px; direction: rtl; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+                    th { background: #f0fdf4; color: #133315; padding: 10px; border: 1px solid #c8e6c9; text-align: right; }
+                </style>
+            </head>
+            <body>
+                <h2 style="color: #133315; margin-bottom: 4px;">منصة مَنَارَة — ${title}</h2>
+                <div style="font-size: 12px; color: #666; margin-bottom: 16px;">تاريخ التصدير: ${new Date().toLocaleDateString('ar-SA')}</div>
+                <table>
+                    <thead><tr><th>م</th><th>الاسم / البيان</th><th>معلومات إضافية</th><th>التقييم / الحالة</th></tr></thead>
+                    <tbody>${itemsRows || '<tr><td colspan="4" style="text-align: center; padding: 20px;">لا توجد سجلات</td></tr>'}</tbody>
+                </table>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        setTimeout(() => {
+            printWindow.focus();
+            printWindow.print();
+        }, 500);
+    };
+
     return (
         <div style={{ padding: '1rem', paddingBottom: '5rem', direction: 'rtl', fontFamily: 'inherit', background: '#f8fafc', minHeight: '100vh' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h2 style={{ fontSize: '1.4rem', color: '#133315', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <ChartBar size={24} color="#558b2f" /> التقارير والإحصائيات
                 </h2>
-                <button onClick={() => setShowFilters(!showFilters)} style={{ background: '#fff', border: '1px solid #ddd', padding: '0.5rem', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#333' }}>
-                    <Funnel size={18} /> فلاتر
-                </button>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                        onClick={handleExportPDF}
+                        disabled={loading || !reportData}
+                        style={{
+                            background: '#fff', border: '1px solid #d32f2f', color: '#d32f2f',
+                            padding: '0.45rem 0.75rem', borderRadius: '10px', display: 'flex',
+                            alignItems: 'center', gap: '0.35rem', fontWeight: 'bold', fontSize: '0.85rem',
+                            cursor: loading ? 'not-allowed' : 'pointer'
+                        }}
+                    >
+                        <FilePdf size={18} weight="fill" color="#d32f2f" /> PDF
+                    </button>
+                    <button onClick={() => setShowFilters(!showFilters)} style={{ background: '#fff', border: '1px solid #ddd', padding: '0.45rem 0.75rem', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#333', fontSize: '0.85rem' }}>
+                        <Funnel size={18} /> فلاتر
+                    </button>
+                </div>
             </div>
 
             {showFilters && (
@@ -118,12 +194,23 @@ const MobileAdminReports = () => {
             ) : reportData && (
                 <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem', marginBottom: '1.5rem' }}>
-                        {Object.entries(reportData.stats || {}).slice(0, 4).map(([key, value]) => (
-                            <div key={key} style={{ background: '#fff', padding: '1rem', borderRadius: '12px', border: '1px solid #eee', textAlign: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                                <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#558b2f' }}>{value}</div>
-                                <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.2rem' }}>{key}</div>
-                            </div>
-                        ))}
+                        {Object.entries(reportData.stats || {})
+                            .filter(([key, val]) => val !== null && val !== undefined)
+                            .slice(0, 4)
+                            .map(([key, value]) => {
+                                let displayVal = value;
+                                if (Array.isArray(value)) {
+                                    displayVal = `${value.length} طالب`;
+                                } else if (typeof value === 'object') {
+                                    displayVal = Object.keys(value).length;
+                                }
+                                return (
+                                    <div key={key} style={{ background: '#fff', padding: '1rem', borderRadius: '12px', border: '1px solid #eee', textAlign: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#558b2f' }}>{displayVal}</div>
+                                        <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.2rem' }}>{STAT_LABELS[key] || key}</div>
+                                    </div>
+                                );
+                            })}
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

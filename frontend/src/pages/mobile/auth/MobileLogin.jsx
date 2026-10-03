@@ -40,7 +40,7 @@ const MobileLogin = () => {
 
         try {
             const data = await loginApi({
-                username: form.username,
+                username: form.username.trim().toLowerCase(),
                 password: form.password,
                 subdomain: form.subdomain || undefined,
             });

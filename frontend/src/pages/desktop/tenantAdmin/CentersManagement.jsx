@@ -14,13 +14,7 @@ import {
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileCentersManagement from '../../mobile/tenantAdmin/MobileCentersManagement';
 
-const CentersManagement = () => {
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileCentersManagement />;
-    }
-
+const CentersManagementDesktop = () => {
     // Current User formatting
     const userStr = localStorage.getItem('user');
     let userObj = null;
@@ -1484,6 +1478,16 @@ const CentersManagement = () => {
             )}
         </div>
     );
+};
+
+const CentersManagement = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileCentersManagement />;
+    }
+
+    return <CentersManagementDesktop />;
 };
 
 export default CentersManagement;

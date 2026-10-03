@@ -7,6 +7,9 @@ urlpatterns = [
     path('points/bonus/', views.grant_bonus_points_view, name='points_grant_bonus'),
     path('points/transactions/', views.points_transactions_view, name='points_transactions_list'),
 
+    # Proxy image
+    path('proxy-image/', views.image_proxy_view, name='proxy_image'),
+
     # 2. المكافآت والمتجر
     path('rewards/', views.rewards_list_create_view, name='rewards_list_create'),
     path('rewards/<uuid:pk>/', views.reward_detail_view, name='reward_detail'),

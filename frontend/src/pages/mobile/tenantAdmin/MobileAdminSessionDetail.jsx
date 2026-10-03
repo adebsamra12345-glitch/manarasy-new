@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { ArrowRight, Clock, User, Check, X, DotsThreeVertical, WarningCircle, UserCircle, Star, PencilSimple } from '@phosphor-icons/react';
+import { ArrowRight, Clock, User, Check, X, DotsThreeVertical, WarningCircle, UserCircle, Star, PencilSimple, FilePdf } from '@phosphor-icons/react';
 import { getTeacherSessionDetail, updateSessionDetails } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
 import { BEHAVIOR_OPTIONS } from '../../desktop/tenantAdmin/AdminSessionDetail';
+import { exportSessionPdf } from '../../../utils/sessionPdfExporter';
 
 const MobileAdminSessionDetail = () => {
     const { ringId, sessionId } = useParams();
@@ -18,6 +19,7 @@ const MobileAdminSessionDetail = () => {
     const [sessionDate, setSessionDate] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [exporting, setExporting] = useState(false);
     const [activeMenuId, setActiveMenuId] = useState(null);
 
     useEffect(() => {
@@ -81,6 +83,19 @@ const MobileAdminSessionDetail = () => {
         }
     };
 
+    const handleExportPdf = async () => {
+        if (exporting || !sessionId) return;
+        setExporting(true);
+        try {
+            await exportSessionPdf(sessionId);
+        } catch (err) {
+            console.error(err);
+            alert('حدث خطأ أثناء تصدير تقرير الجلسة بصيغة PDF');
+        } finally {
+            setExporting(false);
+        }
+    };
+
     return (
         <div style={{ padding: '1rem', paddingBottom: '6rem', direction: 'rtl', fontFamily: 'inherit', background: '#f8fafc', minHeight: '100vh' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -95,11 +110,26 @@ const MobileAdminSessionDetail = () => {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h3 style={{ margin: 0, color: '#133315', fontWeight: 'bold' }}>سجل الحضور ({students.length})</h3>
-                {!isEditMode && (
-                    <button onClick={() => navigate(`${location.pathname}?edit=true`)} style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '8px', padding: '0.4rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 'bold' }}>
-                        <PencilSimple size={16} /> تعديل
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        onClick={handleExportPdf}
+                        disabled={exporting || loading}
+                        style={{
+                            background: '#fff', border: '1px solid #d32f2f', color: '#d32f2f',
+                            borderRadius: '8px', padding: '0.4rem 0.8rem', display: 'flex',
+                            alignItems: 'center', gap: '0.4rem', fontWeight: 'bold', fontSize: '0.85rem',
+                            cursor: exporting ? 'not-allowed' : 'pointer'
+                        }}
+                    >
+                        <FilePdf size={16} weight="fill" color="#d32f2f" />
+                        {exporting ? 'جاري...' : 'تقرير PDF'}
                     </button>
-                )}
+                    {!isEditMode && (
+                        <button onClick={() => navigate(`${location.pathname}?edit=true`)} style={{ background: '#e8f5e9', color: '#2e7d32', border: 'none', borderRadius: '8px', padding: '0.4rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 'bold' }}>
+                            <PencilSimple size={16} /> تعديل
+                        </button>
+                    )}
+                </div>
             </div>
 
             {loading ? (

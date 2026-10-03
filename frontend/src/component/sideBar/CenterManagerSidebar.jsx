@@ -1,6 +1,6 @@
 import { 
     House, Users, GraduationCap, ChalkboardTeacher, 
-    Books, CalendarBlank, Medal, ChartBar, Gear, Sparkle, SignOut, User 
+    Books, CalendarBlank, Medal, ChartBar, Sparkle, SignOut, User 
 } from '@phosphor-icons/react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../../context/AuthContext';
@@ -59,10 +59,6 @@ const CenterManagerSidebar = () => {
                     <ChartBar size={20} />
                     <span>التقارير</span>
                 </NavLink>
-                <NavLink to="/center-manager/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-                    <Gear size={20} />
-                    <span>الإعدادات</span>
-                </NavLink>
                 <NavLink to="/center-manager/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                     <User size={20} />
                     <span>الملف الشخصي</span>
@@ -75,11 +71,7 @@ const CenterManagerSidebar = () => {
                     <span>مساعد منارة الذكي</span>
                 </button>
                 
-                <div className="bottom-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '0.75rem' }}>
-                    <NavLink to="/center-manager/settings" style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(255,255,255,0.7)', textDecoration: 'none', fontSize: '0.9rem' }}>
-                        <Gear size={18} />
-                        <span>الإعدادات</span>
-                    </NavLink>
+                <div className="bottom-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingTop: '0.75rem' }}>
                     <button
                         onClick={handleLogout}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#e57373', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.9rem' }}

@@ -44,7 +44,11 @@ function buildPdfHtml({ title, generatedBy, filters, stats, items, tab }) {
         .join('') || '<tr><td colspan="2" class="nd">لا توجد فلاتر مطبقة</td></tr>';
 
     const statsRows = Object.entries(stats)
-        .map(([k, v]) => `<tr><td class="fl">${k}</td><td class="sv">${v}</td></tr>`)
+        .filter(([, v]) => v !== undefined && v !== null)
+        .map(([k, v]) => {
+            const val = Array.isArray(v) ? `${v.length} عنصر` : typeof v === 'object' ? '' : v;
+            return `<tr><td class="fl">${k}</td><td class="sv">${val}</td></tr>`;
+        })
         .join('');
 
     const tabTitles = {

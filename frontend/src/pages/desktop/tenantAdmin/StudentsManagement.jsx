@@ -9,8 +9,7 @@ import {
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileStudentsManagement from '../../mobile/tenantAdmin/MobileStudentsManagement';
 
-const StudentsManagement = () => {
-    const { isMobile } = useDeviceType();
+const DesktopStudentsManagement = () => {
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -104,10 +103,6 @@ const StudentsManagement = () => {
         month: 'long',
         day: 'numeric'
     });
-
-    if (isMobile) {
-        return <MobileStudentsManagement />;
-    }
 
     useEffect(() => {
         loadInitialData();
@@ -2444,6 +2439,16 @@ const StudentsManagement = () => {
             )}
         </div>
     );
+};
+
+const StudentsManagement = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileStudentsManagement />;
+    }
+
+    return <DesktopStudentsManagement />;
 };
 
 export default StudentsManagement;

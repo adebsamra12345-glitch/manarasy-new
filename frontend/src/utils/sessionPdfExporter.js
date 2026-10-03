@@ -80,14 +80,15 @@ export const exportSessionPdf = async (sessionId, sessionBasicInfo = null) => {
 
         // Build HTML container for rendering
         const container = document.createElement('div');
-        container.style.position = 'absolute';
+        container.style.position = 'fixed';
         container.style.left = '-9999px';
         container.style.top = '0';
         container.style.width = '800px';
         container.style.padding = '32px';
         container.style.boxSizing = 'border-box';
         container.style.direction = 'rtl';
-        container.style.fontFamily = 'Cairo, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        container.style.fontFamily = "'Cairo', 'Tajawal', 'Amiri', 'Segoe UI', Tahoma, sans-serif";
+        container.style.letterSpacing = 'normal';
         container.style.backgroundColor = '#ffffff';
         container.style.color = '#133315';
 
@@ -122,30 +123,32 @@ export const exportSessionPdf = async (sessionId, sessionBasicInfo = null) => {
 
             return `
                 <tr style="border-bottom: 1px solid #e0e0e0; background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fbf8'}; font-size: 13px;">
-                    <td style="padding: 12px 14px; font-weight: bold; color: #133315; text-align: right;">${st.student_name}</td>
+                    <td style="padding: 12px 14px; font-weight: bold; color: #133315; text-align: right; letter-spacing: normal;">${st.student_name}</td>
                     <td style="padding: 12px 14px; text-align: center;">
-                        <span style="display: inline-block; padding: 4px 10px; border-radius: 12px; background-color: ${attBg}; color: ${attColor}; font-weight: bold; font-size: 12px;">
+                        <span style="display: inline-block; padding: 4px 10px; border-radius: 12px; background-color: ${attBg}; color: ${attColor}; font-weight: bold; font-size: 12px; letter-spacing: normal;">
                             ${attText}
                         </span>
                     </td>
-                    <td style="padding: 12px 14px; text-align: center; color: #333;">${behaviorText}</td>
+                    <td style="padding: 12px 14px; text-align: center; color: #333; letter-spacing: normal;">${behaviorText}</td>
                     <td style="padding: 12px 14px; text-align: right; color: #2e7d32; font-family: monospace, system-ui; direction: ltr;">${evalsHtml}</td>
-                    <td style="padding: 12px 14px; text-align: right; color: #555;">${notesText}</td>
+                    <td style="padding: 12px 14px; text-align: right; color: #555; letter-spacing: normal;">${notesText}</td>
                 </tr>
             `;
         }).join('');
 
+        const reportTitle = sessionBasicInfo?.report_title || 'تقرير لجلسة قرآنية';
+
         container.innerHTML = `
-            <div style="border: 2px solid #558b2f; border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
+            <div style="border: 2px solid #558b2f; border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,0.05); font-family: 'Cairo', 'Tajawal', 'Amiri', 'Segoe UI', Tahoma, sans-serif; letter-spacing: normal;">
                 <!-- PDF Header -->
                 <div style="background: linear-gradient(135deg, #133315 0%, #2e7d32 100%); color: #ffffff; padding: 28px 24px; text-align: center; position: relative;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                         <div style="text-align: right;">
-                            <div style="font-size: 14px; opacity: 0.9; font-weight: 500;">${mosqueName}</div>
-                            <div style="font-size: 18px; font-weight: bold; margin-top: 4px; color: #81b255;">${halaqaName}</div>
+                            <div style="font-size: 14px; opacity: 0.9; font-weight: 500; letter-spacing: normal;">${mosqueName}</div>
+                            <div style="font-size: 18px; font-weight: bold; margin-top: 4px; color: #81b255; letter-spacing: normal;">${halaqaName}</div>
                         </div>
                         <div style="text-align: center;">
-                            <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">تقرير الجلسة القرآنية</h1>
+                            <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: normal;">${reportTitle}</h1>
                             <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">Session Report</div>
                         </div>
                         <div style="text-align: left; font-size: 13px; opacity: 0.9;">
@@ -155,7 +158,7 @@ export const exportSessionPdf = async (sessionId, sessionBasicInfo = null) => {
                     
                     <div style="height: 1px; background-color: rgba(255,255,255,0.25); margin: 14px 0;"></div>
                     
-                    <div style="display: flex; justify-content: space-around; font-size: 14px; font-weight: 600; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-around; font-size: 14px; font-weight: 600; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; letter-spacing: normal;">
                         <div>📅 التاريخ: ${sessionDate}</div>
                         <div>⏰ الوقت: ${sessionTime}</div>
                         <div>👨‍🏫 المعلم: ${teacherName}</div>
@@ -164,7 +167,7 @@ export const exportSessionPdf = async (sessionId, sessionBasicInfo = null) => {
 
                 <!-- Session Notes Section -->
                 ${data.notes ? `
-                    <div style="padding: 14px 24px; background-color: #f1f8e9; border-bottom: 1px solid #ded; font-size: 13px; color: #1b5e20; text-align: right;">
+                    <div style="padding: 14px 24px; background-color: #f1f8e9; border-bottom: 1px solid #ded; font-size: 13px; color: #1b5e20; text-align: right; letter-spacing: normal;">
                         <strong>📝 ملاحظات العامة للجلسة:</strong> ${data.notes}
                     </div>
                 ` : ''}
@@ -174,21 +177,21 @@ export const exportSessionPdf = async (sessionId, sessionBasicInfo = null) => {
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
                             <tr style="background-color: #133315; color: #ffffff; font-size: 13px; text-align: right;">
-                                <th style="padding: 12px 14px; border-top-right-radius: 8px; width: 25%;">اسم الطالب</th>
-                                <th style="padding: 12px 14px; text-align: center; width: 15%;">الحضور</th>
-                                <th style="padding: 12px 14px; text-align: center; width: 15%;">السلوك</th>
-                                <th style="padding: 12px 14px; text-align: right; width: 25%;">التقييمات</th>
-                                <th style="padding: 12px 14px; border-top-left-radius: 8px; width: 20%;">ملاحظات المعلم</th>
+                                <th style="padding: 12px 14px; border-top-right-radius: 8px; width: 25%; letter-spacing: normal;">اسم الطالب</th>
+                                <th style="padding: 12px 14px; text-align: center; width: 15%; letter-spacing: normal;">الحضور</th>
+                                <th style="padding: 12px 14px; text-align: center; width: 15%; letter-spacing: normal;">السلوك</th>
+                                <th style="padding: 12px 14px; text-align: right; width: 25%; letter-spacing: normal;">التقييمات</th>
+                                <th style="padding: 12px 14px; border-top-left-radius: 8px; width: 20%; letter-spacing: normal;">ملاحظات المعلم</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${studentsHtml || '<tr><td colspan="5" style="text-align: center; padding: 24px; color: #888; font-size: 14px;">لا يوجد سجل طلاب لهذه الجلسة</td></tr>'}
+                            ${studentsHtml || '<tr><td colspan="5" style="text-align: center; padding: 24px; color: #888; font-size: 14px; letter-spacing: normal;">لا يوجد سجل طلاب لهذه الجلسة</td></tr>'}
                         </tbody>
                     </table>
                 </div>
 
                 <!-- Footer Banner -->
-                <div style="padding: 16px 24px; background-color: #f9fdf9; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #666;">
+                <div style="padding: 16px 24px; background-color: #f9fdf9; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #666; letter-spacing: normal;">
                     <span>🏛️ منصة منارة لتسيير الحلقات القرآنية</span>
                     <span>تم التصدير تلقائياً بتاريخ: ${new Date().toLocaleDateString('ar-SA')}</span>
                 </div>
@@ -197,12 +200,18 @@ export const exportSessionPdf = async (sessionId, sessionBasicInfo = null) => {
 
         document.body.appendChild(container);
 
+        // Ensure fonts are fully loaded before rendering with html2canvas
+        if (document.fonts) {
+            await document.fonts.ready;
+        }
+
         // Convert DOM node to canvas using html2canvas
         const canvas = await html2canvas(container, {
             scale: 2,
             useCORS: true,
             logging: false,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            windowWidth: 1200
         });
 
         document.body.removeChild(container);

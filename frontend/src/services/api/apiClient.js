@@ -35,7 +35,12 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
+        const url = error.config?.url || '';
+        const isAuthRequest = url.includes('/login') || url.includes('/token') || url.includes('/register');
+        const isOnLoginPage = typeof window !== 'undefined' && window.location.pathname.startsWith('/login');
+
+        // لا نقوم بإعادة التحميل أو التوجيه إذا كان الخطأ ناتجاً عن محاولة تسجيل الدخول
+        if (error.response?.status === 401 && !isAuthRequest && !isOnLoginPage) {
             localStorage.clear();
             window.location.href = '/login';
         }

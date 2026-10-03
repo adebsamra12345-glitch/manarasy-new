@@ -1,10 +1,17 @@
 import apiClient from './apiClient';
 
 export const getUsers = async (params = {}) => {
-    const cleanParams = Object.fromEntries(
-        Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '' && v !== 'all')
-    );
-    const query = new URLSearchParams(cleanParams).toString();
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '' && value !== 'all') {
+            if (Array.isArray(value)) {
+                value.forEach(val => queryParams.append(key, val));
+            } else {
+                queryParams.append(key, value);
+            }
+        }
+    });
+    const query = queryParams.toString();
     const url = query ? `/api/users/?${query}` : '/api/users/';
     const response = await apiClient.get(url);
     return response.data;

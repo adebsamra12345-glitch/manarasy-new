@@ -69,7 +69,18 @@ const Login = ({ onLoginSuccess }) => {
                 setError(data.message || 'فشل تسجيل الدخول');
             }
         } catch (err) {
-            const msg = err.response?.data?.message || 'حدث خطأ في الاتصال بالخادم';
+            let msg = 'اسم المستخدم أو كلمة المرور غير صحيحة.';
+            if (err.response?.data?.message) {
+                msg = err.response.data.message;
+            } else if (err.response?.status === 401) {
+                msg = 'اسم المستخدم أو كلمة المرور غير صحيحة.';
+            } else if (err.response?.status === 403) {
+                msg = err.response.data?.message || 'هذا الحساب غير نشط أو ليس لديك صلاحية الدخول';
+            } else if (err.response?.status === 404) {
+                msg = err.response.data?.message || 'المسجد غير مسجل أو تعذر العثور على الحساب';
+            } else if (!err.response) {
+                msg = 'تعذر الاتصال بالخادم، يرجى التأكد من تشغيل الخادم والاتصال بالإنترنت';
+            }
             setError(msg);
         } finally {
             setLoading(false);

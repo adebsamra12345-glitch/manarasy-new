@@ -20,8 +20,7 @@ import {
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileTenantDashboard from '../../mobile/tenantAdmin/MobileTenantDashboard';
 
-const TenantDashboard = () => {
-    const { isMobile } = useDeviceType();
+const DesktopTenantDashboard = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
@@ -55,10 +54,6 @@ const TenantDashboard = () => {
     const [rejectionReasonInput, setRejectionReasonInput] = useState('');
     const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
-
-    if (isMobile) {
-        return <MobileTenantDashboard />;
-    }
 
     const fetchData = async (showRefresh = false) => {
         if (showRefresh) {
@@ -1955,6 +1950,16 @@ const TenantDashboard = () => {
             )}
         </div>
     );
+};
+
+const TenantDashboard = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileTenantDashboard />;
+    }
+
+    return <DesktopTenantDashboard />;
 };
 
 export default TenantDashboard;

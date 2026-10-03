@@ -269,7 +269,7 @@ def tenant_login_view(request):
         subdomain = extract_subdomain(request)
         if not subdomain:
             subdomain = data.get('subdomain', '').strip().lower()
-        username = data.get('username', 'manager').strip()
+        username = data.get('username', 'manager').strip().lower()
         password = data.get('password', '')
 
         if not subdomain or not username or not password:
