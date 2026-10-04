@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # خادم قاعدة بيانات PostgreSQL
+  # ==========================================
+  manarasy-db:
+    image: postgres:15-alpine
+    container_name: manarasy-db
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.prod
+    volumes:
+      - manarasy_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-privileges.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    networks:
+      - manarasy-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-manara_user} -d $${POSTGRES_DB:-manara_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ==========================================
+  # خادم التطبيق الخلفي (Django / DRF)
+  # ==========================================
+  manarasy-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: manarasy-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.prod
+    volumes:
+      - manarasy_static:/app/staticfiles
+      - manarasy_media:/app/media
+    networks:
+      - manarasy-internal
+      - proxy
+    depends_on:
+      manarasy-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      # التوجيه الآمن لواجهة البرمجة عبر النطاق المخصص
+      - "traefik.http.routers.manarasy-api.rule=Host(`api.manarasy.io`)"
+      - "traefik.http.routers.manarasy-api.entrypoints=websecure"
+      - "traefik.http.routers.manarasy-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.manarasy-api.loadbalancer.server.port=8000"
+
+  # ==========================================
+  # خادم الواجهة الأمامية (React SPA + Nginx)
+  # ==========================================
+  manarasy-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: manarasy-frontend
+    restart: unless-stopped
+    volumes:
+      - manarasy_static:/usr/share/nginx/static:ro
+      - manarasy_media:/usr/share/nginx/media:ro
+    networks:
+      - proxy
+    depends_on:
+      - manarasy-backend
+    labels:
+      - "traefik.enable=true"
+      # توجيه النطاق الرئيسي والنطاقات الفرعية للمساجد (*.manarasy.io)
+      - "traefik.http.routers.manarasy-web.rule=Host(`manarasy.io`, `www.manarasy.io`) || HostRegexp(`{subdomain:[a-z0-9-]+}.manarasy.io`)"
+      - "traefik.http.routers.manarasy-web.entrypoints=websecure"
+      - "traefik.http.routers.manarasy-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.manarasy-web.loadbalancer.server.port=80"
+      # إعادة توجيه HTTP إلى HTTPS تلقائياً
+      - "traefik.http.routers.manarasy-web-http.rule=Host(`manarasy.io`, `www.manarasy.io`) || HostRegexp(`{subdomain:[a-z0-9-]+}.manarasy.io`)"
+      - "traefik.http.routers.manarasy-web-http.entrypoints=web"
+      - "traefik.http.routers.manarasy-web-http.middlewares=manarasy-redirect-https"
+      - "traefik.http.middlewares.manarasy-redirect-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.manarasy-redirect-https.redirectscheme.permanent=true"
+
+# ==========================================
+# وحدات التخزين المشتركة والمعزولة
+# ==========================================
+volumes:
+  manarasy_postgres_data:
+    name: manarasy_postgres_data
+  manarasy_static:
+    name: manarasy_static
+  manarasy_media:
+    name: manarasy_media
+
+# ==========================================
+# الشبكات: شبكة وسيط Traefik وشبكة معزولة للبيانات
+# ==========================================
+networks:
+  manarasy-internal:
+    name: manarasy-internal
+    internal: true
+  proxy:
+    external: true

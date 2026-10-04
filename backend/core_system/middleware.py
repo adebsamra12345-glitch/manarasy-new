@@ -11,14 +11,28 @@ class TenantJWTAuthMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # 1. Resolve Tenant DB
+        # 1. Resolve Tenant DB (Header, Subdomain, or Custom Domain)
         tenant_id = request.headers.get('Tenant-ID')
+        tenant_subdomain = request.headers.get('X-Tenant-Subdomain')
         db_name = 'default'
         
-        if tenant_id:
-            try:
-                from core_system.tenants.models import Tenant
-                tenant = Tenant.objects.using('default').get(id=tenant_id)
+        try:
+            from core_system.tenants.models import Tenant
+            tenant = None
+            if tenant_id:
+                tenant = Tenant.objects.using('default').filter(id=tenant_id, is_active=True).first()
+            elif tenant_subdomain:
+                tenant = Tenant.objects.using('default').filter(subdomain=tenant_subdomain, is_active=True).first()
+            else:
+                host = request.get_host().split(':')[0].lower()
+                if host.endswith('manarasy.io'):
+                    parts = host.split('.')
+                    if len(parts) >= 3 and parts[0] not in ('api', 'www', 'app'):
+                        tenant = Tenant.objects.using('default').filter(subdomain=parts[0], is_active=True).first()
+                else:
+                    tenant = Tenant.objects.using('default').filter(custom_domain=host, is_active=True).first()
+
+            if tenant:
                 db_name = tenant.db_name
                 # Fallback for dynamic DB injection
                 if db_name not in settings.DATABASES:
@@ -31,8 +45,8 @@ class TenantJWTAuthMiddleware:
                         'PORT': tenant.db_port or 5432,
                     })
                     settings.DATABASES[db_name] = new_db
-            except Exception:
-                pass
+        except Exception:
+            pass
         
         request.db_name = db_name
         

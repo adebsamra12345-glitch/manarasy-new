@@ -1,0 +1,58 @@
+# ==========================================
+# المرحلة 1: تجميع عجلات بايثون والمكتبات
+# ==========================================
+FROM python:3.11-slim-bullseye AS builder
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# تثبيت متطلبات البناء لمترجم C الخاص بقواعد البيانات
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libpq-dev python3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --upgrade pip
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /usr/src/app/wheels -r requirements.txt
+
+# ==========================================
+# المرحلة 2: صورة التشغيل النهائية والمؤمنة
+# ==========================================
+FROM python:3.11-slim-bullseye
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
+
+# إنشاء مستخدم نظام غير جذري
+RUN addgroup --system django && adduser --system --ingroup django django
+
+# تثبيت المكتبات التنفيذية وأدوات فحص الجاهزية
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libpq5 postgresql-client curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# تثبيت عجلات بايثون المجهزة مسبقاً
+COPY --from=builder /usr/src/app/wheels /wheels
+COPY --from=builder /app/requirements.txt .
+RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
+
+# نسخ كود المشروع وسكربت الإقلاع
+COPY . .
+COPY entrypoint.prod.sh /entrypoint.prod.sh
+RUN sed -i 's/\r$//g' /entrypoint.prod.sh && \
+    chmod +x /entrypoint.prod.sh
+
+# تجهيز مجلدات التخزين وضبط الصلاحيات للمستخدم غير الجذري
+RUN mkdir -p /app/staticfiles /app/media && \
+    chown -R django:django /app /entrypoint.prod.sh
+
+# التحويل إلى المستخدم الآمن
+USER django
+
+ENTRYPOINT ["/entrypoint.prod.sh"]
+
+# التشغيل الموحد عبر Gunicorn مع تطبيق WSGI الصحيح
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--threads", "2", "config.wsgi:application"]

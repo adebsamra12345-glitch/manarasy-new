@@ -1,0 +1,36 @@
+# ==========================================
+# المرحلة 1: بناء تطبيق React بواسطة Vite
+# ==========================================
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# نسخ ملفات الاعتماديات وتثبيتها بدقة
+COPY package.json package-lock.json ./
+RUN npm ci --prefer-offline --no-audit
+
+# نسخ كود الواجهة وبناء حزمة الإنتاج
+COPY . .
+ENV NODE_ENV=production
+RUN npm run build
+
+# ==========================================
+# المرحلة 2: تشغيل الخادم بواسطة Nginx مصغر
+# ==========================================
+FROM nginx:1.25-alpine
+
+# حذف الإعدادات والصفحات الافتراضية
+RUN rm -rf /etc/nginx/conf.d/default.conf /usr/share/nginx/html/*
+
+# نسخ مخرجات Vite الفعلية من مجلد dist
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# نسخ إعدادات Nginx المخصصة لخدمة الـ SPA والملفات الثابتة
+COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+
+# إنشاء مجلدات الربط للملفات الثابتة والوسائط المشتركة مع Django
+RUN mkdir -p /usr/share/nginx/static /usr/share/nginx/media
+
+EXPOSE 80
+STOPSIGNAL SIGQUIT
+
+CMD ["nginx", "-g", "daemon off;"]
