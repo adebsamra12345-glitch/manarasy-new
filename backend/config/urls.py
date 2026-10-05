@@ -12,6 +12,11 @@ api_urlpatterns = [
     path('subscriptions/', include('core_system.subscriptions.urls')),
     path('payments/', include('core_system.payments.urls')),
     path('backups/', include('core_system.backups.urls')),
+
+    # أدمن المنصة + مسار التسجيل اليدوي (شام كاش)
+    path('public/', include('core_system.registrations.urls_public')),
+    path('platform/auth/', include('platform_auth.urls')),
+    path('platform/', include('core_system.registrations.urls_platform')),
     
     # tenant_modules (Tenant DB)
     path('users/', include('tenant_modules.users.urls')),

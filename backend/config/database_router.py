@@ -14,7 +14,13 @@ class TenantRouter:
         'points_and_rewards',
     ]
 
+    # تطبيقات المنصة المركزية الجديدة: لا يجوز أن تُنشأ جداولها داخل قواعد المساجد
+    master_only_apps = ['platform_auth', 'registrations']
+
     def allow_migrate(self, db, app_label, model_name=None, **hints):
+        if app_label in self.master_only_apps:
+            return db == 'default'
+
         # إذا كانت الوجهة هي القاعدة المركزية manara_db (والتي تسمى default في Django)
         if db == 'default':
             # منع ترحيل تطبيقات المسجد إليها
@@ -22,4 +28,4 @@ class TenantRouter:
                 return False
             # السماح بترحيل تطبيقات النظام المركزي
             return True
-        return None
+        return None

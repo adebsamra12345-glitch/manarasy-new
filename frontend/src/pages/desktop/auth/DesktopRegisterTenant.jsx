@@ -1,19 +1,43 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Mosque, ListChecks, CreditCard, CheckCircle,
     Eye, EyeSlash, CaretRight, CaretLeft, Sparkle,
-    Check, Star, Robot, Warning
+    Check, Star, Robot, Warning, Hourglass, ArrowsClockwise,
 } from '@phosphor-icons/react';
-import { getPlans, registerTenant } from '../../../services/api/tenantService';
-import { createSubscription, createPayment } from '../../../services/api/paymentService';
+import {
+    createRegistration, extractApiError, getPlans, getRegistrationStatus, uploadReceipt,
+} from '../../../services/api/registrationService';
+import { validateReceiptFile } from '../../../utils/receiptValidation';
+import ShamCashPayment from './ShamCashPayment';
 
 const STEPS = [
     { id: 1, label: 'معلومات المسجد', icon: Mosque },
     { id: 2, label: 'خطة الاشتراك', icon: ListChecks },
-    { id: 3, label: 'الدفع', icon: CreditCard },
-    { id: 4, label: 'التأكيد', icon: CheckCircle },
+    { id: 3, label: 'الدفع (شام كاش)', icon: CreditCard },
+    { id: 4, label: 'قيد المراجعة', icon: CheckCircle },
 ];
+
+// حفظ مرجع الطلب مؤقتاً (للجلسة فقط) كي لا يُنشأ طلب مكرر إذا فشل رفع الإشعار أو أُعيد تحميل الصفحة
+const PENDING_KEY = 'manara_pending_registration';
+const readPending = () => {
+    try { return JSON.parse(sessionStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; }
+};
+const writePending = (value) => {
+    try {
+        if (value) sessionStorage.setItem(PENDING_KEY, JSON.stringify(value));
+        else sessionStorage.removeItem(PENDING_KEY);
+    } catch { /* التخزين غير متاح — نتجاهل */ }
+};
+
+const STATUS_TEXT = {
+    PENDING_PAYMENT: 'بانتظار إشعار الدفع',
+    PENDING_APPROVAL: 'قيد المراجعة من فريق المنصة',
+    PROVISIONING: 'جارٍ تجهيز قاعدة بيانات مسجدك',
+    APPROVED: 'تمت الموافقة — مسجدك جاهز',
+    REJECTED: 'تم رفض الطلب',
+    PROVISIONING_FAILED: 'تعذّر تجهيز المسجد، سيتواصل معك الفريق',
+};
 
 const Register = () => {
     const navigate = useNavigate();
@@ -32,7 +56,6 @@ const Register = () => {
         contact_email: '',
         admin_password: '',
         confirm_password: '',
-        db_name: '',
     });
     const [showPass, setShowPass] = useState(false);
     const [showConfirmPass, setShowConfirmPass] = useState(false);
@@ -40,72 +63,67 @@ const Register = () => {
     // Step 2: Plan selection
     const [selectedPlanId, setSelectedPlanId] = useState(null);
 
-    // Step 3: Payment
-    const [paymentMethod, setPaymentMethod] = useState('CARD');
-    const [cardForm, setCardForm] = useState({
-        cardNumber: '',
-        expiry: '',
-        cvv: '',
-        cardName: '',
-    });
-    const [shamCashPhone, setShamCashPhone] = useState('');
+    // Step 3: Sham Cash receipt
+    const [receiptFile, setReceiptFile] = useState(null);
+    const [receiptRef, setReceiptRef] = useState('');
+    const [uploadProgress, setUploadProgress] = useState(null);
 
-    useEffect(() => {
-        fetchPlans();
-    }, []);
+    // مرجع الطلب بعد إنشائه (id + upload_token)
+    const registrationRef = useRef(readPending());
+    const [refreshing, setRefreshing] = useState(false);
 
-    const fetchPlans = async () => {
+    const selectedPlan = plans.find(p => p.id === selectedPlanId);
+
+    const fetchPlans = useCallback(async () => {
         try {
             const data = await getPlans();
             if (data.status === 'success') {
                 setPlans(data.data);
-                if (data.data.length > 0) setSelectedPlanId(data.data[0].id);
+                if (data.data.length > 0) setSelectedPlanId(prev => prev ?? data.data[0].id);
             }
         } catch {
-            // Use fallback plans if API not available
-            setPlans([
-                { id: 1, name: 'الخطة الأساسية', code: 'M_BASIC_30', billing_cycle: 'MONTHLY', price_usd: '30.00', has_ai_features: false },
-                { id: 2, name: 'خطة الذكاء الاصطناعي', code: 'M_AI_50', billing_cycle: 'MONTHLY', price_usd: '50.00', has_ai_features: true },
-            ]);
-            setSelectedPlanId(1);
+            setError('تعذّر تحميل خطط الاشتراك، حدّث الصفحة وحاول مجدداً');
         } finally {
             setLoadingPlans(false);
         }
-    };
+    }, []);
 
-    // Auto-generate db_name from subdomain
+    useEffect(() => { fetchPlans(); }, [fetchPlans]);
+
+    // استعادة صفحة "قيد المراجعة" بعد إعادة تحميل الصفحة
+    useEffect(() => {
+        const saved = registrationRef.current;
+        if (saved?.submitted) {
+            setResultData({ mosque_name: saved.mosque_name, subdomain: saved.subdomain, plan: saved.plan, status: saved.status });
+            setStep(4);
+        } else if (saved?.id) {
+            // طلب أُنشئ لكن لم يكتمل رفع الإشعار: نكمل من خطوة الدفع دون إنشاء طلب جديد
+            setSelectedPlanId(saved.plan_id ?? null);
+            setStep(3);
+            setError('لديك طلب سابق لم يكتمل رفع إشعار الدفع له. ارفع الإشعار لإكمال الطلب.');
+        }
+    }, []);
+
     const handleMosqueChange = (e) => {
         const { name, value } = e.target;
-        const cleaned = name === 'subdomain' ? value.toLowerCase().replace(/[^a-z0-9_]/g, '') : value;
-        setMosqueForm(prev => ({
-            ...prev,
-            [name]: cleaned,
-            ...(name === 'subdomain' ? { db_name: `db_${cleaned}` } : {}),
-        }));
+        // نطاق فرعي صالح DNS: أحرف إنجليزية صغيرة وأرقام وشرطة فقط
+        const cleaned = name === 'subdomain' ? value.toLowerCase().replace(/[^a-z0-9-]/g, '') : value;
+        setMosqueForm(prev => ({ ...prev, [name]: cleaned }));
         setError('');
     };
 
     const validateStep1 = () => {
-        if (!mosqueForm.name.trim()) return 'اسم المسجد مطلوب';
-        if (!mosqueForm.subdomain.trim()) return 'النطاق الفرعي مطلوب';
-        if (mosqueForm.subdomain.length < 3) return 'النطاق الفرعي يجب أن يكون 3 أحرف على الأقل';
-        if (!mosqueForm.contact_phone.trim()) return 'رقم هاتف التواصل مطلوب';
-        if (!mosqueForm.admin_password) return 'كلمة المرور مطلوبة';
-        if (mosqueForm.admin_password.length < 6) return 'كلمة المرور يجب أن لا تقل عن 6 أحرف';
-        if (mosqueForm.admin_password !== mosqueForm.confirm_password) return 'كلمتا المرور غير متطابقتين';
-        return '';
-    };
-
-    const validateStep3 = () => {
-        if (paymentMethod === 'CARD') {
-            if (!cardForm.cardName.trim()) return 'اسم حامل البطاقة مطلوب';
-            if (cardForm.cardNumber.replace(/\s/g, '').length < 16) return 'رقم البطاقة غير صحيح';
-            if (!cardForm.expiry) return 'تاريخ الانتهاء مطلوب';
-            if (cardForm.cvv.length < 3) return 'رمز CVV غير صحيح';
+        const f = mosqueForm;
+        if (!f.name.trim()) return 'اسم المسجد مطلوب';
+        if (!f.subdomain.trim()) return 'النطاق الفرعي مطلوب';
+        if (!/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/.test(f.subdomain)) {
+            return 'النطاق الفرعي: 3–30 حرفاً إنجليزياً صغيراً أو أرقاماً أو شرطة، ويبدأ بحرف';
         }
-        if (paymentMethod === 'SHAM_CASH') {
-            if (!shamCashPhone.trim()) return 'رقم هاتف شام كاش مطلوب';
-        }
+        if (!f.contact_phone.trim()) return 'رقم هاتف التواصل مطلوب';
+        if (!/^\+?[0-9][0-9 ()-]{6,18}[0-9]$/.test(f.contact_phone.trim())) return 'رقم الهاتف غير صالح';
+        if (!f.admin_password) return 'كلمة المرور مطلوبة';
+        if (f.admin_password.length < 8) return 'كلمة المرور يجب أن لا تقل عن 8 أحرف';
+        if (f.admin_password !== f.confirm_password) return 'كلمتا المرور غير متطابقتين';
         return '';
     };
 
@@ -115,85 +133,79 @@ const Register = () => {
             const err = validateStep1();
             if (err) { setError(err); return; }
         }
-        if (step === 2) {
-            if (!selectedPlanId) { setError('يرجى اختيار خطة اشتراك'); return; }
-        }
-        if (step === 3) {
-            const err = validateStep3();
-            if (err) { setError(err); return; }
-            await handleSubmit();
-            return;
-        }
+        if (step === 2 && !selectedPlanId) { setError('يرجى اختيار خطة اشتراك'); return; }
+        if (step === 3) { await handleSubmit(); return; }
         setStep(s => s + 1);
     };
 
     const handleSubmit = async () => {
-        setSubmitting(true);
         setError('');
+        const fileErr = await validateReceiptFile(receiptFile);
+        if (fileErr) { setError(fileErr); return; }
+
+        setSubmitting(true);
+        setUploadProgress(null);
         try {
-            // 1. Create the tenant
-            const tenantPayload = {
-                name: mosqueForm.name,
-                subdomain: mosqueForm.subdomain,
-                db_name: mosqueForm.db_name || `db_${mosqueForm.subdomain}`,
-                contact_phone: mosqueForm.contact_phone,
-                contact_email: mosqueForm.contact_email,
-                admin_password: mosqueForm.admin_password,
-            };
-            const tenantRes = await registerTenant(tenantPayload);
-            if (tenantRes.status !== 'success') throw new Error(tenantRes.message);
+            // 1) إنشاء الطلب مرة واحدة فقط (إن نجح سابقاً وفشل الرفع نعيد استخدام المرجع)
+            let ref = registrationRef.current;
+            if (!ref?.id) {
+                const res = await createRegistration({
+                    mosque_name: mosqueForm.name.trim(),
+                    subdomain: mosqueForm.subdomain,
+                    contact_phone: mosqueForm.contact_phone.trim(),
+                    contact_email: mosqueForm.contact_email.trim(),
+                    admin_password: mosqueForm.admin_password,
+                    plan_id: selectedPlanId,
+                });
+                ref = {
+                    id: res.data.id, token: res.data.upload_token,
+                    mosque_name: mosqueForm.name.trim(), subdomain: res.data.subdomain, plan: selectedPlan?.name,
+                    plan_id: selectedPlanId,
+                };
+                registrationRef.current = ref;
+                writePending(ref);
+            }
 
-            const tenantId = tenantRes.data.id;
-            const selectedPlan = plans.find(p => p.id === selectedPlanId);
+            // 2) رفع الإشعار
+            const up = await uploadReceipt(ref.id, ref.token, receiptFile, receiptRef.trim(), setUploadProgress);
+            ref = { ...ref, submitted: true, status: up.data?.status || 'PENDING_APPROVAL' };
+            registrationRef.current = ref;
+            writePending(ref);
 
-            // 2. Create subscription
-            const now = new Date();
-            const ends = new Date(now);
-            ends.setMonth(ends.getMonth() + (selectedPlan?.billing_cycle === 'ANNUAL' ? 12 : 1));
-
-            const subRes = await createSubscription({
-                tenant_id: tenantId,
-                plan_id: selectedPlanId,
-                starts_at: now.toISOString(),
-                ends_at: ends.toISOString(),
-                status: 'PENDING',
-            });
-            if (subRes.status !== 'success') throw new Error(subRes.message);
-
-            // 3. Record payment
-            await createPayment({
-                subscription_id: subRes.data.id,
-                amount: selectedPlan?.price_usd || '30.00',
-                currency: 'USD',
-                payment_method: paymentMethod === 'SHAM_CASH' ? 'SHAM_CASH' : 'CARD',
-                status: 'PENDING',
-                transaction_id: `TXN-${Date.now()}`,
-            });
-
-            setResultData({
-                mosque_name: mosqueForm.name,
-                subdomain: mosqueForm.subdomain,
-                username: 'manager',
-                plan: selectedPlan?.name,
-            });
+            setResultData({ mosque_name: ref.mosque_name, subdomain: ref.subdomain, plan: ref.plan, status: ref.status });
             setStep(4);
         } catch (err) {
-            const msg = err.response?.data?.message || err.message || 'حدث خطأ غير متوقع';
-            setError(msg);
+            setError(extractApiError(err));
         } finally {
             setSubmitting(false);
+            setUploadProgress(null);
         }
     };
 
-    const formatCardNumber = (value) => {
-        const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-        const matches = v.match(/\d{4,16}/g);
-        const match = (matches && matches[0]) || '';
-        const parts = [];
-        for (let i = 0, len = match.length; i < len; i += 4) {
-            parts.push(match.substring(i, i + 4));
+    const refreshStatus = async () => {
+        const ref = registrationRef.current;
+        if (!ref?.id) return;
+        setRefreshing(true);
+        try {
+            const res = await getRegistrationStatus(ref.id, ref.token);
+            const next = { ...ref, status: res.data.status, rejection_reason: res.data.rejection_reason };
+            registrationRef.current = next;
+            writePending(next);
+            setResultData(prev => ({ ...prev, status: res.data.status, rejection_reason: res.data.rejection_reason }));
+        } catch (err) {
+            setError(extractApiError(err));
+        } finally {
+            setRefreshing(false);
         }
-        return parts.length ? parts.join(' ') : value;
+    };
+
+    const startOver = () => {
+        writePending(null);
+        registrationRef.current = null;
+        setResultData(null);
+        setReceiptFile(null);
+        setReceiptRef('');
+        setStep(1);
     };
 
     return (
@@ -303,7 +315,7 @@ const Register = () => {
                                         name="admin_password"
                                         value={mosqueForm.admin_password}
                                         onChange={handleMosqueChange}
-                                        placeholder="6 أحرف على الأقل"
+                                        placeholder="8 أحرف على الأقل"
                                         className="register-input"
                                     />
                                     <button type="button" className="register-eye-btn" onClick={() => setShowPass(!showPass)}>
@@ -383,194 +395,94 @@ const Register = () => {
                     </div>
                 )}
 
-                {/* Step 3: Payment */}
+                {/* Step 3: Payment — Sham Cash (manual) */}
                 {step === 3 && (
                     <div className="register-card">
                         <div className="register-card-header">
                             <CreditCard size={28} weight="duotone" className="register-card-icon" />
                             <h2>إتمام الدفع</h2>
-                            <p>اختر طريقة الدفع المناسبة وأكمل الاشتراك</p>
+                            <p>حوّل المبلغ عبر شام كاش وارفع إشعار التحويل</p>
                         </div>
 
-                        {/* Order Summary */}
-                        <div className="payment-summary">
-                            <div className="payment-summary-row">
-                                <span>الخطة المختارة</span>
-                                <strong>{plans.find(p => p.id === selectedPlanId)?.name}</strong>
-                            </div>
-                            <div className="payment-summary-row total">
-                                <span>الإجمالي</span>
-                                <strong className="payment-total">${plans.find(p => p.id === selectedPlanId)?.price_usd} / شهر</strong>
-                            </div>
-                        </div>
-
-                        {/* Payment Method Toggle */}
-                        <div className="payment-methods">
-                            <button
-                                className={`payment-method-btn ${paymentMethod === 'CARD' ? 'active' : ''}`}
-                                onClick={() => setPaymentMethod('CARD')}
-                            >
-                                <CreditCard size={20} />
-                                بطاقة ائتمان
-                            </button>
-                            <button
-                                className={`payment-method-btn ${paymentMethod === 'SHAM_CASH' ? 'active' : ''}`}
-                                onClick={() => setPaymentMethod('SHAM_CASH')}
-                            >
-                                <span className="shamcash-badge">SC</span>
-                                شام كاش
-                            </button>
-                        </div>
-
-                        {/* Card Form */}
-                        {paymentMethod === 'CARD' && (
-                            <div className="card-form">
-                                {/* Card Preview */}
-                                <div className="credit-card-preview">
-                                    <div className="card-chip"></div>
-                                    <div className="card-number-display">
-                                        {cardForm.cardNumber || '•••• •••• •••• ••••'}
-                                    </div>
-                                    <div className="card-bottom">
-                                        <div>
-                                            <div className="card-label">اسم الحامل</div>
-                                            <div className="card-holder">{cardForm.cardName || 'الاسم الكامل'}</div>
-                                        </div>
-                                        <div>
-                                            <div className="card-label">تاريخ الانتهاء</div>
-                                            <div className="card-expiry">{cardForm.expiry || 'MM/YY'}</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="register-form-grid">
-                                    <div className="register-field full-width">
-                                        <label>اسم حامل البطاقة <span className="req">*</span></label>
-                                        <input
-                                            type="text"
-                                            value={cardForm.cardName}
-                                            onChange={(e) => setCardForm(p => ({ ...p, cardName: e.target.value }))}
-                                            placeholder="الاسم كما هو على البطاقة"
-                                            className="register-input"
-                                        />
-                                    </div>
-                                    <div className="register-field full-width">
-                                        <label>رقم البطاقة <span className="req">*</span></label>
-                                        <input
-                                            type="text"
-                                            value={cardForm.cardNumber}
-                                            onChange={(e) => setCardForm(p => ({ ...p, cardNumber: formatCardNumber(e.target.value) }))}
-                                            placeholder="0000 0000 0000 0000"
-                                            maxLength={19}
-                                            className="register-input"
-                                            dir="ltr"
-                                        />
-                                    </div>
-                                    <div className="register-field">
-                                        <label>تاريخ الانتهاء <span className="req">*</span></label>
-                                        <input
-                                            type="text"
-                                            value={cardForm.expiry}
-                                            onChange={(e) => {
-                                                let v = e.target.value.replace(/\D/g, '');
-                                                if (v.length >= 2) v = v.slice(0, 2) + '/' + v.slice(2, 4);
-                                                setCardForm(p => ({ ...p, expiry: v }));
-                                            }}
-                                            placeholder="MM/YY"
-                                            maxLength={5}
-                                            className="register-input"
-                                            dir="ltr"
-                                        />
-                                    </div>
-                                    <div className="register-field">
-                                        <label>رمز CVV <span className="req">*</span></label>
-                                        <input
-                                            type="text"
-                                            value={cardForm.cvv}
-                                            onChange={(e) => setCardForm(p => ({ ...p, cvv: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                                            placeholder="•••"
-                                            maxLength={4}
-                                            className="register-input"
-                                            dir="ltr"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Sham Cash Form */}
-                        {paymentMethod === 'SHAM_CASH' && (
-                            <div className="shamcash-form">
-                                <div className="shamcash-logo-area">
-                                    <div className="shamcash-logo">SC</div>
-                                    <div>
-                                        <strong>شام كاش</strong>
-                                        <p>بوابة الدفع الإلكترونية السورية</p>
-                                    </div>
-                                </div>
-                                <div className="register-field">
-                                    <label>رقم هاتف شام كاش <span className="req">*</span></label>
-                                    <input
-                                        type="tel"
-                                        value={shamCashPhone}
-                                        onChange={(e) => setShamCashPhone(e.target.value)}
-                                        placeholder="+963 9XX XXX XXX"
-                                        className="register-input"
-                                        dir="ltr"
-                                    />
-                                </div>
-                                <div className="shamcash-note">
-                                    <Warning size={18} />
-                                    <span>ستصلك رسالة تأكيد على هاتفك لإتمام عملية الدفع عبر تطبيق شام كاش</span>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="payment-security-note">
-                            🔒 جميع بيانات الدفع مشفرة وآمنة
-                        </div>
+                        <ShamCashPayment
+                            amount={selectedPlan?.price_usd}
+                            planName={selectedPlan?.name}
+                            file={receiptFile}
+                            onFileChange={setReceiptFile}
+                            reference={receiptRef}
+                            onReferenceChange={setReceiptRef}
+                            uploadProgress={uploadProgress}
+                            disabled={submitting}
+                        />
                     </div>
                 )}
 
-                {/* Step 4: Success */}
+                {/* Step 4: Under review */}
                 {step === 4 && (
                     <div className="register-success">
                         <div className="success-icon-circle">
-                            <CheckCircle size={64} weight="fill" />
+                            {resultData?.status === 'APPROVED'
+                                ? <CheckCircle size={64} weight="fill" />
+                                : <Hourglass size={64} weight="fill" />}
                         </div>
-                        <h2>تم إنشاء حساب مسجدك بنجاح! 🎉</h2>
-                        <p>يمكنك الآن تسجيل الدخول وبدء إدارة حلقاتك القرآنية</p>
+
+                        {resultData?.status === 'APPROVED' ? (
+                            <>
+                                <h2>تمت الموافقة، مسجدك جاهز! 🎉</h2>
+                                <p>سجّل الدخول باسم المستخدم <b dir="ltr">manager</b> وكلمة المرور التي اخترتها عند التسجيل</p>
+                            </>
+                        ) : resultData?.status === 'REJECTED' ? (
+                            <>
+                                <h2>لم يتم قبول الطلب</h2>
+                                <p>{resultData?.rejection_reason || 'يرجى مراجعة بيانات الدفع والتواصل معنا'}</p>
+                            </>
+                        ) : (
+                            <>
+                                <h2>تم استلام طلبك وإشعار الدفع</h2>
+                                <p>سيراجع فريق المنصة الإشعار وتُفعَّل خدمتك بعد الموافقة. يمكنك إغلاق الصفحة وتفقّد الحالة لاحقاً.</p>
+                            </>
+                        )}
 
                         <div className="success-credentials">
-                            <h3>بيانات الدخول</h3>
+                            <h3>تفاصيل الطلب</h3>
+                            <div className="cred-row">
+                                <span className="cred-label">المسجد</span>
+                                <span className="cred-value">{resultData?.mosque_name}</span>
+                            </div>
                             <div className="cred-row">
                                 <span className="cred-label">رابط المسجد</span>
                                 <span className="cred-value" dir="ltr">{resultData?.subdomain}.manarasy.com</span>
                             </div>
                             <div className="cred-row">
-                                <span className="cred-label">اسم المستخدم</span>
-                                <span className="cred-value" dir="ltr">manager</span>
-                            </div>
-                            <div className="cred-row">
-                                <span className="cred-label">النطاق الفرعي</span>
-                                <span className="cred-value" dir="ltr">{resultData?.subdomain}</span>
-                            </div>
-                            <div className="cred-row">
                                 <span className="cred-label">خطة الاشتراك</span>
                                 <span className="cred-value">{resultData?.plan}</span>
                             </div>
+                            <div className="cred-row">
+                                <span className="cred-label">حالة الطلب</span>
+                                <span className="cred-value">{STATUS_TEXT[resultData?.status] || resultData?.status}</span>
+                            </div>
                         </div>
 
-                        <button className="register-btn-primary" onClick={() => navigate('/login')}>
-                            الانتقال لتسجيل الدخول
-                            <CaretLeft size={18} />
-                        </button>
+                        {resultData?.status === 'APPROVED' ? (
+                            <button className="register-btn-primary" onClick={() => { writePending(null); navigate('/login'); }}>
+                                الانتقال لتسجيل الدخول
+                                <CaretLeft size={18} />
+                            </button>
+                        ) : resultData?.status === 'REJECTED' ? (
+                            <button className="register-btn-primary" onClick={startOver}>
+                                تقديم طلب جديد
+                            </button>
+                        ) : (
+                            <button className="register-btn-primary" onClick={refreshStatus} disabled={refreshing}>
+                                {refreshing ? <span className="login-spinner"></span> : <><ArrowsClockwise size={18} /> تحديث الحالة</>}
+                            </button>
+                        )}
                     </div>
                 )}
 
                 {/* Error */}
                 {error && (
-                    <div className="register-error">
+                    <div className="register-error" role="alert">
                         <Warning size={18} />
                         {error}
                     </div>
@@ -580,7 +492,7 @@ const Register = () => {
                 {step < 4 && (
                     <div className="register-nav">
                         {step > 1 && (
-                            <button className="register-btn-back" onClick={() => { setStep(s => s - 1); setError(''); }}>
+                            <button className="register-btn-back" disabled={submitting} onClick={() => { setStep(s => s - 1); setError(''); }}>
                                 <CaretRight size={18} />
                                 رجوع
                             </button>
@@ -588,12 +500,12 @@ const Register = () => {
                         <button
                             className="register-btn-primary"
                             onClick={handleNext}
-                            disabled={submitting}
+                            disabled={submitting || (step === 2 && loadingPlans)}
                         >
                             {submitting ? (
                                 <span className="login-spinner"></span>
                             ) : step === 3 ? (
-                                <>إتمام الدفع والتسجيل</>
+                                <>إرسال الطلب</>
                             ) : (
                                 <>التالي <CaretLeft size={18} /></>
                             )}
@@ -606,5 +518,3 @@ const Register = () => {
 };
 
 export default Register;
-
-

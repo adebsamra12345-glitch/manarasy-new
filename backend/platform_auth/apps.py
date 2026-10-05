@@ -1,0 +1,8 @@
+from django.apps import AppConfig
+
+
+class PlatformAuthConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'platform_auth'
+    label = 'platform_auth'
+    verbose_name = 'أدمن المنصة'

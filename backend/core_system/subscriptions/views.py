@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from core_system.tenants.models import Tenant
 from .models import Plan, Subscription
+from platform_auth.authentication import platform_admin_required
 
 def parse_body(request):
     if not request.body:
@@ -57,6 +58,7 @@ def plan_list_view(request):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 @csrf_exempt
+@platform_admin_required
 def subscription_list_create_view(request):
     print("\n==========================================")
     print(f"[START] Subscriptions API (core_system.subscriptions): Method={request.method}")

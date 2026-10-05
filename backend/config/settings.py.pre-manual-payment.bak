@@ -38,7 +38,6 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'tenant-id',
-    'x-upload-token',     # رمز رفع إيصال الدفع (مسار التسجيل العام)
 ]
 
 
@@ -60,9 +59,6 @@ INSTALLED_APPS = [
     'core_system.subscriptions',
     'core_system.payments',
     'core_system.backups',
-    # Platform-level (master DB only): أدمن المنصة + طلبات التسجيل والإيصالات
-    'platform_auth',
-    'core_system.registrations',
     # Tenant apps (tenant_modules)
     'tenant_modules.users',
     'tenant_modules.centers_and_projects',
@@ -73,6 +69,47 @@ INSTALLED_APPS = [
     'tenant_modules.reports_and_certificates',
     'tenant_modules.points_and_rewards',
 ]
+
+SHARED_APPS = [
+    "django_tenants", "django.contrib.contenttypes", "django.contrib.auth",
+    "rest_framework", "corsheaders",
+    "platform_auth",      # أدمن المنصة (public schema فقط)
+    "registrations",      # الطلبات + الإيصالات + Mosque/Domain (public schema)
+]
+TENANT_APPS = [
+    "django.contrib.contenttypes", "django.contrib.auth",
+    "accounts",           # مستخدمو المسجد (داخل schema المسجد)
+    "halaqat",            # الحلقات والطلاب ... إلخ
+]
+INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]
+
+TENANT_MODEL = "registrations.Mosque"
+TENANT_DOMAIN_MODEL = "registrations.Domain"
+AUTH_USER_MODEL = "accounts.User"                  # مستخدم المسجد
+PUBLIC_SCHEMA_URLCONF = "config.urls_public"       # /api/public/* و /api/platform/*
+ROOT_URLCONF = "config.urls_tenant"                # واجهات المسجد فقط
+
+MIDDLEWARE = ["django_tenants.middleware.main.TenantMainMiddleware", *MIDDLEWARE]
+
+PRIVATE_MEDIA_ROOT = "/srv/manara/private"         # خارج أي static/media يخدمه Nginx
+RECEIPT_MAX_BYTES = 5 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.auth.TenantJWTAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {
+        "public_register": "5/hour", "receipt_upload": "10/hour",
+        "platform_login": "10/min", "platform_api": "120/min",
+    },
+}
+CACHES = {"default": {
+    "BACKEND": "django_redis.cache.RedisCache", "LOCATION": "redis://redis:6379/1",
+    "KEY_FUNCTION": "django_tenants.cache.make_key",
+    "REVERSE_KEY_FUNCTION": "django_tenants.cache.reverse_key",
+}}
+
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -145,19 +182,12 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-# التخزين المؤقت: Redis عند ضبط REDIS_URL، وإلا ذاكرة العملية (يكفي لتقييد المعدل بشكل أولي).
-# ملاحظة: LocMem منفصل لكل Worker في gunicorn، لذا فعّل Redis في الإنتاج.
-REDIS_URL = os.getenv('REDIS_URL', '')
-if REDIS_URL:
-    CACHES = {"default": {
+CACHES = {
+    "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
-    }}
-else:
-    CACHES = {"default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "manara-default",
-    }}
+        "LOCATION": "redis://127.0.0.1:6379/1",
+    }
+}
 
 LANGUAGE_CODE = 'en-us'
 
@@ -195,8 +225,6 @@ MIGRATION_MODULES = {
     'subscriptions': 'migrations.master.subscriptions',
     'payments': 'migrations.master.payments',
     'backups': 'migrations.master.backups',
-    'platform_auth': 'migrations.master.platform_auth',
-    'registrations': 'migrations.master.registrations',
     
     # تطبيقات قالب المسجد (Tenant DB Template)
     'users': 'migrations.tenant_template.users',
@@ -211,41 +239,3 @@ MIGRATION_MODULES = {
 
 # تفعيل موجه قواعد البيانات
 DATABASE_ROUTERS = ['config.database_router.TenantRouter']
-
-
-# =====================================================================
-# مسار الدفع اليدوي (شام كاش) + أدمن المنصة
-# =====================================================================
-
-# إيصالات الدفع تُخزَّن خارج MEDIA_ROOT (لا يخدمها Nginx إطلاقاً) وتُقدَّم فقط عبر API للأدمن العام
-PRIVATE_MEDIA_ROOT = os.getenv('PRIVATE_MEDIA_ROOT', str(BASE_DIR / 'private_media'))
-RECEIPT_MAX_BYTES = int(os.getenv('RECEIPT_MAX_BYTES', str(5 * 1024 * 1024)))   # 5MB
-RECEIPT_MAX_FILES_PER_REQUEST = 3
-FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
-DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
-
-# JWT الخاص بأدمن المنصة: مفتاح منفصل + audience/issuer مختلفان عن توكنات المساجد،
-# لذلك لا يمكن استخدام توكن مسجد على واجهات المنصة ولا العكس.
-PLATFORM_JWT_SECRET = os.getenv('PLATFORM_JWT_SECRET', '')   # يُشتق من SECRET_KEY إن تُرك فارغاً
-PLATFORM_JWT_LIFETIME_MINUTES = int(os.getenv('PLATFORM_JWT_LIFETIME_MINUTES', '120'))
-PLATFORM_LOGIN_MAX_FAILURES = 5
-PLATFORM_LOGIN_LOCK_MINUTES = 15
-
-# إنشاء قاعدة المسجد: متزامن افتراضياً. اضبط PROVISIONING_ASYNC=true بعد تشغيل Celery + Redis
-PROVISIONING_ASYNC = os.getenv('PROVISIONING_ASYNC', 'False').lower() in ('true', '1', 't')
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', REDIS_URL or '')
-
-# توقيع HMAC لإشعارات بوابة شام كاش (إن لم يُضبط تُرفض كل الإشعارات)
-SHAM_CASH_WEBHOOK_SECRET = os.getenv('SHAM_CASH_WEBHOOK_SECRET', '')
-
-REST_FRAMEWORK = {
-    # لا نغيّر الـ defaults العامة (باقي الـ views هي Django views عادية)؛ كل View جديد يحدد صلاحياته صراحةً
-    'NUM_PROXIES': int(os.getenv('NUM_PROXIES', '1')),   # خلف Traefik
-    'DEFAULT_THROTTLE_RATES': {
-        'public_register': '5/hour',
-        'receipt_upload': '15/hour',
-        'registration_status': '60/hour',
-        'platform_login': '10/min',
-        'platform_api': '240/min',
-    },
-}

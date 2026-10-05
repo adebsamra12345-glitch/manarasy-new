@@ -36,6 +36,8 @@ services:
     volumes:
       - manarasy_static:/app/staticfiles
       - manarasy_media:/app/media
+      # إيصالات الدفع: مجلد خاص لا يُركَّب في حاوية Nginx إطلاقاً
+      - manarasy_private:/app/private_media
     networks:
       - manarasy-internal
       - proxy
@@ -96,6 +98,8 @@ volumes:
     name: manarasy_static
   manarasy_media:
     name: manarasy_media
+  manarasy_private:
+    name: manarasy_private
 
 # ==========================================
 # الشبكات: شبكة وسيط Traefik وشبكة معزولة للبيانات

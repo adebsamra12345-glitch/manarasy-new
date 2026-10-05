@@ -1,9 +1,13 @@
+import hashlib
+import hmac
 import json
 import traceback
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from core_system.subscriptions.models import Subscription
 from .models import PaymentTransaction
+from platform_auth.authentication import platform_admin_required
 
 def parse_body(request):
     if not request.body:
@@ -14,6 +18,7 @@ def parse_body(request):
         raise ValueError("صيغة البيانات غير صالحة")
 
 @csrf_exempt
+@platform_admin_required
 def payment_list_create_view(request):
     print("\n==========================================")
     print(f"[START] Payments API (core_system.payments): Method={request.method}")
@@ -91,12 +96,23 @@ def payment_list_create_view(request):
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
+def _webhook_signature_valid(request):
+    """
+    الإشعار يجب أن يحمل X-Signature = HMAC-SHA256(body, SHAM_CASH_WEBHOOK_SECRET) بصيغة hex.
+    إن لم يُضبط السر في الإعدادات تُرفض كل الإشعارات (fail closed) — كان المسار سابقاً مفتوحاً للجميع.
+    """
+    secret = getattr(settings, 'SHAM_CASH_WEBHOOK_SECRET', '')
+    if not secret:
+        return False
+    provided = request.headers.get('X-Signature', '')
+    expected = hmac.new(secret.encode(), request.body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided, expected)
+
+
 @csrf_exempt
 def sham_cash_webhook_view(request):
-    print("\n==========================================")
-    print(f"[START] Sham Cash Webhook: Method={request.method}")
-    print("==========================================")
-    
+    if request.method == 'POST' and not _webhook_signature_valid(request):
+        return JsonResponse({"status": "error", "message": "توقيع غير صالح"}, status=403)
     if request.method == 'POST':
         try:
             print("  [STEP 1] Receiving Sham Cash callback payload...")
@@ -104,6 +120,8 @@ def sham_cash_webhook_view(request):
             
             tx_id = data.get('transaction_id')
             status = data.get('status', 'SUCCESS')
+            if status not in ('SUCCESS', 'FAILED', 'PENDING'):
+                return JsonResponse({"status": "error", "message": "حالة غير صالحة"}, status=400)
             print(f"  [STEP 2] Callback received for TxID={tx_id}, status={status}")
             
             if tx_id:

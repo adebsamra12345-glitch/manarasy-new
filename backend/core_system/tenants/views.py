@@ -6,6 +6,7 @@ from django.db import IntegrityError
 from django.conf import settings
 from .models import Tenant
 from .provisioning import create_tenant_database
+from platform_auth.authentication import platform_admin_required
 import jwt
 from datetime import datetime, timedelta
 from django.contrib.auth.hashers import check_password
@@ -50,6 +51,7 @@ def health_check_view(request):
         }, status=500)
 
 @csrf_exempt
+@platform_admin_required
 def tenant_list_create_view(request):
     print("\n==========================================")
     print(f"[START] Tenant API (core_system.tenants): Method={request.method}, Path={request.path}")
@@ -188,6 +190,7 @@ def tenant_list_create_view(request):
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 @csrf_exempt
+@platform_admin_required
 def tenant_detail_view(request, pk):
     print("\n==========================================")
     print(f"[START] Tenant Detail API (core_system.tenants): ID={pk}, Method={request.method}")

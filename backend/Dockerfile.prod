@@ -46,7 +46,7 @@ RUN sed -i 's/\r$//g' /entrypoint.prod.sh && \
     chmod +x /entrypoint.prod.sh
 
 # تجهيز مجلدات التخزين وضبط الصلاحيات للمستخدم غير الجذري
-RUN mkdir -p /app/staticfiles /app/media && \
+RUN mkdir -p /app/staticfiles /app/media /app/private_media && \
     chown -R django:django /app /entrypoint.prod.sh
 
 # التحويل إلى المستخدم الآمن
@@ -55,4 +55,4 @@ USER django
 ENTRYPOINT ["/entrypoint.prod.sh"]
 
 # التشغيل الموحد عبر Gunicorn مع تطبيق WSGI الصحيح
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--threads", "2", "config.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--threads", "2", "--timeout", "180", "config.wsgi:application"]

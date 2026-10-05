@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // ===== Layout & Common =====
@@ -8,14 +8,17 @@ import MainLayout from './component/common/MainLayout';
 import { AuthProvider, useAuthContext } from './context/AuthContext';
 import { TenantProvider } from './context/TenantContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { PlatformAuthProvider, PlatformRoute } from './context/PlatformAuthContext';
 
 // ===== Desktop — Auth =====
 import DesktopLogin from './pages/desktop/auth/DesktopLogin';
 import DesktopRegisterTenant from './pages/desktop/auth/DesktopRegisterTenant';
 
-// ===== Desktop — Super Admin =====
-import SuperAdminDashboard from './pages/desktop/superAdmin/SuperAdminDashboard';
-import TenantManagement from './pages/desktop/superAdmin/TenantManagement';
+// ===== Platform Admin (منفصل تماماً عن مصادقة المساجد) — تحميل كسول لتقليل حجم الحزمة الأولية =====
+const PlatformLogin = lazy(() => import('./pages/platform/PlatformLogin'));
+const PlatformLayout = lazy(() => import('./pages/platform/PlatformLayout'));
+const RegistrationRequests = lazy(() => import('./pages/platform/RegistrationRequests'));
+const MosquesPage = lazy(() => import('./pages/platform/MosquesPage'));
 
 // ===== Desktop — Tenant Admin =====
 import TenantDashboard from './pages/desktop/tenantAdmin/TenantDashboard';
@@ -66,7 +69,7 @@ import './index.css';
 // الصفحة الرئيسية الافتراضية حسب دور المستخدم
 // ─────────────────────────────────────────────
 const ROLE_DEFAULT_ROUTE = {
-    super_admin: '/super/dashboard',
+    super_admin: '/platform',
     tenant_admin: '/admin/dashboard',
     center_manager: '/center-manager/dashboard',
     teacher: '/teacher/dashboard',
@@ -106,6 +109,7 @@ const RoleBasedRedirect = () => {
 function App() {
     return (
         <AuthProvider>
+            <PlatformAuthProvider>
             <TenantProvider>
                 <NotificationProvider>
                     <BrowserRouter>
@@ -119,22 +123,22 @@ function App() {
                             <Route path="/dashboard" element={<RoleBasedRedirect />} />
 
                             {/* ===================================================
-                                SUPER ADMIN — /super/*
+                                PLATFORM ADMIN — /platform/*  (توثيق ومفاتيح JWT منفصلة عن المساجد)
+                                /super/* قديم ⇒ يُحوَّل إلى /platform
                             =================================================== */}
+                            <Route path="/super/*" element={<Navigate to="/platform" replace />} />
+                            <Route path="/platform/login" element={<Suspense fallback={null}><PlatformLogin /></Suspense>} />
                             <Route
-                                path="/super"
+                                path="/platform"
                                 element={
-                                    <PrivateRoute allowedRoles={['super_admin']}>
-                                        <MainLayout />
-                                    </PrivateRoute>
+                                    <PlatformRoute>
+                                        <Suspense fallback={null}><PlatformLayout /></Suspense>
+                                    </PlatformRoute>
                                 }
                             >
-                                <Route index element={<Navigate to="dashboard" replace />} />
-                                <Route path="dashboard" element={<SuperAdminDashboard />} />
-                                <Route path="tenants" element={<TenantManagement />} />
-                                <Route path="invoices" element={<PlaceholderView title="الاشتراكات والفواتير" />} />
-                                <Route path="health" element={<PlaceholderView title="صحة النظام" />} />
-                                <Route path="profile" element={<ProfilePage />} />
+                                <Route index element={<Navigate to="requests" replace />} />
+                                <Route path="requests" element={<Suspense fallback={null}><RegistrationRequests /></Suspense>} />
+                                <Route path="mosques" element={<Suspense fallback={null}><MosquesPage /></Suspense>} />
                             </Route>
 
                             {/* ===================================================
@@ -246,6 +250,7 @@ function App() {
                     </BrowserRouter>
                 </NotificationProvider>
             </TenantProvider>
+            </PlatformAuthProvider>
         </AuthProvider>
     );
 }
