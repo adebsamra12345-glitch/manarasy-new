@@ -1,0 +1,18 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Frontend build output & deps
+frontend/node_modules/
+frontend/dist/
+
+# Uploaded files & data dumps
+backend/media/
+backend/staticfiles/
+backend/dbdump.json
