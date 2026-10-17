@@ -94,17 +94,30 @@ const MobileHalqaList = ({ hideRings = false, hideStats = false }) => {
                 payload.session_date = sessionDate;
             }
             const res = await startSession(payload);
-            if (res.status === 'success' && res.data?.session_id) {
+            const targetSessionId = res.data?.session_id || res.data?.id;
+            if (res.status === 'success' && targetSessionId) {
                 setShowDatePickerModal(false);
                 setConflictRingId(null);
-                navigate(`/teacher/rings/${ringId}/sessions/${res.data.session_id}?edit=true`);
+                if (res.data?.is_resumed) {
+                    setToast({ message: 'تم استئناف جلسة اليوم الجارية بنجاح', type: 'info' });
+                }
+                navigate(`/teacher/rings/${ringId}/sessions/${targetSessionId}?edit=true`);
             } else {
-                setToast({ message: 'فشل في إنشاء الجلسة الجديدة', type: 'error' });
+                setToast({ message: res.message || 'فشل في إنشاء الجلسة الجديدة', type: 'error' });
             }
         } catch (err) {
             console.error(err);
+            const confSessionId = err.response?.data?.conflicting_session_id;
+            const confDate = err.response?.data?.conflicting_date || (sessionDate || todayISO);
+
+            // إذا كان التعارض لجلسة اليوم ولم يتم تمرير تاريخ مخصص، نقوم بالتحويل المباشر لجلسة اليوم
+            if (confSessionId && (!sessionDate || confDate === todayISO)) {
+                setToast({ message: 'تم الانتقال إلى جلسة اليوم المسجلة مسبقاً', type: 'info' });
+                navigate(`/teacher/rings/${ringId}/sessions/${confSessionId}?edit=true`);
+                return;
+            }
+
             if (err.response?.status === 409 || err.response?.data?.error_code === 'SESSION_DATE_CONFLICT') {
-                const confDate = err.response?.data?.conflicting_date || (sessionDate || todayISO);
                 setConflictDate(confDate);
                 setConflictRingId(ringId);
                 setShowDatePickerModal(true);
@@ -242,18 +255,37 @@ const MobileHalqaList = ({ hideRings = false, hideStats = false }) => {
                             <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: '5px', backgroundColor: '#558b2f' }}></div>
 
                             <div style={{ paddingRight: '0.5rem', marginBottom: '0.8rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.4rem' }}>
                                     <h4 style={{ margin: '0 0 0.3rem 0', fontSize: '1.15rem', color: '#133315', fontWeight: 'bold' }}>{ring.name}</h4>
-                                    <span style={{
-                                        fontSize: '0.72rem',
-                                        padding: '0.2rem 0.6rem',
-                                        borderRadius: '12px',
-                                        backgroundColor: ring.is_active ? '#e8f5e9' : '#f5f5f5',
-                                        color: ring.is_active ? '#2e7d32' : '#757575',
-                                        fontWeight: 'bold'
-                                    }}>
-                                        {ring.is_active ? 'نشطة' : 'غير نشطة'}
-                                    </span>
+                                    <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                                        {ring.today_session && (
+                                            <span style={{
+                                                fontSize: '0.72rem',
+                                                padding: '0.2rem 0.5rem',
+                                                borderRadius: '12px',
+                                                backgroundColor: '#e8f5e9',
+                                                color: '#2e7d32',
+                                                fontWeight: 'bold',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.3rem',
+                                                border: '1px solid #c8e6c9'
+                                            }}>
+                                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#43a047' }}></span>
+                                                جلسة جارية اليوم
+                                            </span>
+                                        )}
+                                        <span style={{
+                                            fontSize: '0.72rem',
+                                            padding: '0.2rem 0.6rem',
+                                            borderRadius: '12px',
+                                            backgroundColor: ring.is_active ? '#e8f5e9' : '#f5f5f5',
+                                            color: ring.is_active ? '#2e7d32' : '#757575',
+                                            fontWeight: 'bold'
+                                        }}>
+                                            {ring.is_active ? 'نشطة' : 'غير نشطة'}
+                                        </span>
+                                    </div>
                                 </div>
                                 <p style={{ margin: 0, fontSize: '0.82rem', color: '#666' }}>
                                     {ring.project_title || ring.center_name || 'بدون مشروع'} • {ring.students_count || 0} طالب
@@ -282,28 +314,51 @@ const MobileHalqaList = ({ hideRings = false, hideStats = false }) => {
                                     <Books size={16} />
                                     عرض الجلسات
                                 </button>
-                                <button
-                                    onClick={() => handleStartNewSession(ring.id)}
-                                    disabled={startingSessionId === ring.id}
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '0.4rem',
-                                        padding: '0.6rem',
-                                        borderRadius: '10px',
-                                        border: 'none',
-                                        background: '#f57c00',
-                                        color: '#fff',
-                                        fontWeight: 'bold',
-                                        fontSize: '0.85rem',
-                                        cursor: startingSessionId === ring.id ? 'wait' : 'pointer',
-                                        opacity: startingSessionId === ring.id ? 0.7 : 1
-                                    }}
-                                >
-                                    <PlayCircle size={18} />
-                                    {startingSessionId === ring.id ? 'جاري البث...' : 'جلسة جديدة'}
-                                </button>
+                                {ring.today_session ? (
+                                    <button
+                                        onClick={() => navigate(`/teacher/rings/${ring.id}/sessions/${ring.today_session.id}?edit=true`)}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '0.4rem',
+                                            padding: '0.6rem',
+                                            borderRadius: '10px',
+                                            border: 'none',
+                                            background: '#2e7d32',
+                                            color: '#fff',
+                                            fontWeight: 'bold',
+                                            fontSize: '0.85rem',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <PlayCircle size={18} weight="fill" />
+                                        متابعة الجلسة
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => handleStartNewSession(ring.id)}
+                                        disabled={startingSessionId === ring.id}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '0.4rem',
+                                            padding: '0.6rem',
+                                            borderRadius: '10px',
+                                            border: 'none',
+                                            background: '#f57c00',
+                                            color: '#fff',
+                                            fontWeight: 'bold',
+                                            fontSize: '0.85rem',
+                                            cursor: startingSessionId === ring.id ? 'wait' : 'pointer',
+                                            opacity: startingSessionId === ring.id ? 0.7 : 1
+                                        }}
+                                    >
+                                        <PlayCircle size={18} />
+                                        {startingSessionId === ring.id ? 'جاري البدء...' : 'جلسة جديدة'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ))}

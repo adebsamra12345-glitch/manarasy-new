@@ -431,6 +431,13 @@ const DesktopStudentsManagement = () => {
             } else {
                 await createStudent(payload);
                 showToast(`تمت إضافة الطالب "${payload.full_name}" بنجاح إلى قاعدة البيانات`);
+                // Reset all filters so that active filters do not hide the newly created student
+                setSelectedCenterId('all');
+                setSelectedRingId('all');
+                setSelectedGender('all');
+                setSelectedSocialStatus('all');
+                setSortBy('newest');
+                setSearchQuery(payload.full_name);
             }
 
             setIsWizardOpen(false);

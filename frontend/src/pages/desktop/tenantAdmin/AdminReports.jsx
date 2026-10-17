@@ -153,17 +153,12 @@ function buildPdfHtml({ title, generatedBy, filters, stats, items, tab }) {
 </html>`;
 }
 
-const AdminReports = () => {
+const DesktopAdminReports = () => {
     const { user, role } = useAuthContext();
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
     const isCenterManager = (role && role.toLowerCase() === 'center_manager') || location.pathname.startsWith('/center-manager');
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileAdminReports />;
-    }
 
     // Dates
     const todayDate = new Date();
@@ -1184,6 +1179,16 @@ const AdminReports = () => {
             )}
         </div>
     );
+};
+
+const AdminReports = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAdminReports />;
+    }
+
+    return <DesktopAdminReports />;
 };
 
 export default AdminReports;

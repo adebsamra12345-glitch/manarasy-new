@@ -22,8 +22,7 @@ import MobileHalqaManagement from '../../mobile/tenantAdmin/MobileHalqaManagemen
 /**
  * HalqaManagement (إدارة الحلقات القرآنية - الأدمن ومدير المركز)
  */
-const HalqaManagement = () => {
-    const { isMobile } = useDeviceType();
+const DesktopHalqaManagement = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const basePath = location.pathname.startsWith('/center-manager') ? '/center-manager' : '/admin';
@@ -70,10 +69,6 @@ const HalqaManagement = () => {
         month: 'long', 
         day: 'numeric' 
     });
-
-    if (isMobile) {
-        return <MobileHalqaManagement />;
-    }
 
     useEffect(() => {
         fetchRings();
@@ -971,6 +966,16 @@ const HalqaManagement = () => {
             )}
         </div>
     );
+};
+
+const HalqaManagement = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileHalqaManagement />;
+    }
+
+    return <DesktopHalqaManagement />;
 };
 
 export default HalqaManagement;

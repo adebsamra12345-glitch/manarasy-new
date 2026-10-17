@@ -141,14 +141,9 @@ const StatusBadge = ({ status }) => {
 };
 
 /* ─── Main Component ─────────────────────────────────────────────────────────── */
-const TeacherStudents = () => {
+const DesktopTeacherStudents = () => {
     const navigate = useNavigate();
-    const { isMobile } = useDeviceType();
     const { user } = useAuthContext();
-
-    if (isMobile) {
-        return <MobileTeacherStudents />;
-    }
 
     const today = new Date();
     const dateStr = today.toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -507,6 +502,16 @@ const TeacherStudents = () => {
             <style>{`@keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
         </div>
     );
+};
+
+const TeacherStudents = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileTeacherStudents />;
+    }
+
+    return <DesktopTeacherStudents />;
 };
 
 export default TeacherStudents;

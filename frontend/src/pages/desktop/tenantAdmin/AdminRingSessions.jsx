@@ -612,7 +612,9 @@ const AdminRingSessions = () => {
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'space-between',
-                                    padding: '1.3rem 1.8rem',
+                                    flexWrap: 'wrap',
+                                    gap: '1rem',
+                                    padding: '1.2rem 1.6rem',
                                     border: '1px solid #c8e6c9',
                                     borderRadius: '16px',
                                     background: '#fff',
@@ -643,11 +645,11 @@ const AdminRingSessions = () => {
                                     backgroundColor: '#f57c00'
                                 }}></div>
 
-                                <div style={{ textAlign: 'right', paddingRight: '12px' }}>
+                                <div style={{ textAlign: 'right', paddingRight: '12px', minWidth: '220px' }}>
                                     <h3 style={{ fontSize: '1.3rem', color: '#133315', marginBottom: '0.4rem', fontWeight: 'bold' }}>
                                         {formatSessionDate(session.session_date)}
                                     </h3>
-                                    <div style={{ color: '#666', display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9rem' }}>
+                                    <div style={{ color: '#666', display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9rem', flexWrap: 'wrap' }}>
                                         <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                             الحضور: <strong style={{ color: '#133315' }}>{session.present_count || 0}</strong> من {session.total_count || 0}
                                             <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#81b255', display: 'inline-block' }}></span>
@@ -668,7 +670,7 @@ const AdminRingSessions = () => {
                                     </div>
                                 </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', flexWrap: 'wrap' }}>
                                     {/* زر تصدير تقرير الجلسة PDF */}
                                     <button
                                         type="button"

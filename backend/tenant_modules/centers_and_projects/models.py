@@ -131,12 +131,23 @@ class Project(models.Model):
         ('QURAN', 'مشروع قرآني'),
         ('CUSTOM', 'مشروع مخصص (منهجي)'),
     ]
+    EVALUATION_UNIT_CHOICES = [
+        ('PAGES', 'صفحات'),
+        ('LESSONS', 'دروس مخصصة'),
+        ('TOPICS', 'محاور مخصصة'),
+    ]
+    RECITATION_DIRECTION_CHOICES = [
+        ('FORWARD', 'تصاعدي (من البداية إلى النهاية)'),
+        ('REVERSE', 'عكسي (من النهاية إلى البداية)'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     centers = models.ManyToManyField(Center, related_name='projects', blank=True)
     title = models.CharField(max_length=150)
     description = models.TextField(null=True, blank=True)
     project_type = models.CharField(max_length=20, choices=PROJECT_TYPE_CHOICES, default='QURAN')
+    evaluation_unit = models.CharField(max_length=20, choices=EVALUATION_UNIT_CHOICES, default='PAGES')
+    recitation_direction = models.CharField(max_length=10, choices=RECITATION_DIRECTION_CHOICES, default='FORWARD')
     is_global = models.BooleanField(default=False)
     require_exam_for_all_stages = models.BooleanField(default=False)
     evaluation_template = models.ForeignKey(
@@ -185,6 +196,8 @@ class StagePart(models.Model):
     PART_TYPE_CHOICES = [
         ('DEFAULT_QURAN', 'جزء قرآني افتراضي'),
         ('CUSTOM', 'جزء مخصص'),
+        ('LESSON', 'درس مخصص'),
+        ('TOPIC', 'محور مخصص'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

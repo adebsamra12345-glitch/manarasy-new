@@ -103,17 +103,25 @@ const TeacherSessions = () => {
                 payload.session_date = sessionDate;
             }
             const response = await startSession(payload);
-            if (response.status === 'success') {
+            const targetSessionId = response.data?.session_id || response.data?.id;
+            if (response.status === 'success' && targetSessionId) {
                 setShowDatePickerModal(false);
-                const newSessionId = response.data.session_id;
-                navigate(`/teacher/rings/${selectedRingId}/sessions/${newSessionId}?edit=true`);
+                navigate(`/teacher/rings/${selectedRingId}/sessions/${targetSessionId}?edit=true`);
             } else {
                 alert(response.message || 'حدث خطأ أثناء بدء الجلسة');
             }
         } catch (err) {
             console.error(err);
+            const confSessionId = err.response?.data?.conflicting_session_id;
+            const todayISO = new Date().toISOString().slice(0, 10);
+            const confDate = err.response?.data?.conflicting_date || (sessionDate || todayISO);
+
+            if (confSessionId && (!sessionDate || confDate === todayISO)) {
+                navigate(`/teacher/rings/${selectedRingId}/sessions/${confSessionId}?edit=true`);
+                return;
+            }
+
             if (err.response?.status === 409 || err.response?.data?.error_code === 'SESSION_DATE_CONFLICT') {
-                const confDate = err.response?.data?.conflicting_date || (sessionDate || new Date().toISOString().slice(0, 10));
                 setConflictDate(confDate);
                 setShowDatePickerModal(true);
             } else {
@@ -268,12 +276,14 @@ const TeacherSessions = () => {
                         return (
                             <div
                                 key={session.id}
-                                onClick={() => navigate(`/teacher/rings/${selectedRingId}/sessions/${session.id}`)}
+                                onClick={() => navigate(`/teacher/rings/${selectedRingId}/sessions/${session.id}?edit=true`)}
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'space-between',
-                                    padding: '1.5rem 2rem',
+                                    flexWrap: 'wrap',
+                                    gap: '1rem',
+                                    padding: '1.25rem 1.75rem',
                                     border: '1px solid #558b2f',
                                     borderRadius: '16px',
                                     background: '#fff',
@@ -302,8 +312,8 @@ const TeacherSessions = () => {
                                     backgroundColor: '#f57c00'
                                 }}></div>
 
-                                <div style={{ textAlign: 'right', paddingRight: '20px' }}>
-                                    <h3 style={{ fontSize: '1.4rem', color: '#133315', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                                <div style={{ textAlign: 'right', paddingRight: '20px', minWidth: '200px' }}>
+                                    <h3 style={{ fontSize: '1.35rem', color: '#133315', marginBottom: '0.4rem', fontWeight: 'bold' }}>
                                         {formatSessionDate(session.session_date)}
                                     </h3>
                                     <p style={{ color: '#888', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.95rem' }}>
@@ -312,7 +322,7 @@ const TeacherSessions = () => {
                                     </p>
                                 </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                                     {/* Export PDF Button */}
                                     <button
                                         type="button"

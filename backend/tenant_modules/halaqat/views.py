@@ -4,6 +4,7 @@ import jwt
 from datetime import datetime
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from core_system.auth import get_tenant_db
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q
@@ -11,6 +12,7 @@ from core_system.tenants.models import Tenant
 from tenant_modules.centers_and_projects.models import Center, Project
 from tenant_modules.users.models import UserProfile
 from tenant_modules.students_and_parents.models import Student
+from tenant_modules.attendance.models import HalaqaSession
 from .models import Halaqa
 
 def parse_body(request):
@@ -20,28 +22,6 @@ def parse_body(request):
         return json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         raise ValueError("بيانات غير صالحة")
-
-def get_tenant_db(request):
-    tenant_id = request.headers.get('Tenant-ID')
-    if not tenant_id:
-        raise ValueError("ترويسة Tenant-ID مفقودة في الطلب")
-
-    tenant = Tenant.objects.using('default').get(id=tenant_id)
-    db_name = tenant.db_name
-
-    if db_name not in settings.DATABASES:
-        new_db_config = settings.DATABASES['default'].copy()
-        new_db_config.update({
-            'NAME': tenant.db_name,
-            'USER': tenant.db_user or settings.DATABASES['default'].get('USER'),
-            'PASSWORD': tenant.db_password_hash or settings.DATABASES['default'].get('PASSWORD'),
-            'HOST': tenant.db_host or 'localhost',
-            'PORT': tenant.db_port or 5432,
-        })
-        settings.DATABASES[db_name] = new_db_config
-
-    return db_name
-
 
 def get_token_payload(request):
     """استخراج بيانات التوكن من الطلب بدون رمي استثناء."""
@@ -240,8 +220,16 @@ def halaqa_list_create_view(request):
                     halaqat = halaqat.none()
 
             halaqat = halaqat.select_related('center', 'project').order_by('-created_at')
+            today_date = timezone.now().date()
+            today_sessions = {
+                str(s.halaqa_id): s for s in HalaqaSession.objects.using(db_name).filter(
+                    session_date=today_date
+                )
+            }
+
             res = []
             for h in halaqat:
+                today_s = today_sessions.get(str(h.id))
                 res.append({
                     "id": str(h.id),
                     "center_id": str(h.center.id) if h.center else None,
@@ -254,13 +242,18 @@ def halaqa_list_create_view(request):
                         Q(halaqa=h) | Q(enrollments__halaqa=h, enrollments__is_active=True)
                     ).distinct().count(),
                     "is_active": h.is_active,
+                    "today_session": {
+                        "id": str(today_s.id),
+                        "is_active": today_s.is_active,
+                        "session_date": today_s.session_date.isoformat()
+                    } if today_s else None,
                     "created_at": h.created_at.isoformat() if h.created_at else None,
                     "deleted_at": h.deleted_at.isoformat() if h.deleted_at else None
                 })
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الحلقات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الحلقات"}, status=500)
 
     elif request.method == 'POST':
         try:
@@ -359,7 +352,7 @@ def halaqa_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند حفظ الحلقة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند حفظ الحلقة"}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -518,7 +511,7 @@ def halaqa_detail_view(request, pk):
                 }
             }, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل بيانات الحلقة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل بيانات الحلقة"}, status=500)
 
     elif request.method == 'PATCH':
         if not check_halaqa_permission(request, db_name, center=halaqa.center):
@@ -537,7 +530,7 @@ def halaqa_detail_view(request, pk):
                 return JsonResponse({"status": "success", "message": f"تم {state} الحلقة بنجاح"})
             return JsonResponse({"status": "error", "message": "يجب تمرير حالة is_active"}, status=400)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تغيير حالة الحلقة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تغيير حالة الحلقة"}, status=500)
 
     elif request.method == 'DELETE':
         if not check_halaqa_permission(request, db_name, center=halaqa.center):
@@ -550,6 +543,6 @@ def halaqa_detail_view(request, pk):
             halaqa.save(using=db_name)
             return JsonResponse({"status": "success", "message": f"تم حذف حلقة ({halaqa_name}) بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف الحلقة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف الحلقة"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)

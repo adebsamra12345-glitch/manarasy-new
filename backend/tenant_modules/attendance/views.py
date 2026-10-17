@@ -6,6 +6,7 @@ import traceback
 import jwt
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from core_system.auth import get_tenant_db
 from django.conf import settings
 from django.utils import timezone
 from django.db import transaction, IntegrityError
@@ -15,6 +16,7 @@ from tenant_modules.halaqat.models import Halaqa
 from tenant_modules.students_and_parents.models import Student, StudentEnrollment
 from tenant_modules.centers_and_projects.models import Project, EvaluationTemplate, EvaluationGrade
 from tenant_modules.recitation_and_sabr.models import RecitationLog
+from core_system.auth import tenant_auth, STAFF_ROLES
 from .models import HalaqaSession, AttendanceLog, SessionAuditLog
 
 def get_token_payload(request):
@@ -39,6 +41,7 @@ def get_current_user_info(request):
     return None, 'مستخدم النظام'
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def available_dates_view(request):
     """
     جلب التواريخ المتاحة والشاغرة لحلقة معينة خلال شهر محدد لضمان عدم تكرار الجلسات.
@@ -117,7 +120,7 @@ def available_dates_view(request):
         }, status=200)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب التواريخ المتاحة", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب التواريخ المتاحة"}, status=500)
 
 
 def parse_body(request):
@@ -127,27 +130,6 @@ def parse_body(request):
         return json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         raise ValueError("بيانات غير صالحة")
-
-def get_tenant_db(request):
-    tenant_id = request.headers.get('Tenant-ID')
-    if not tenant_id:
-        return 'default'
-    try:
-        tenant = Tenant.objects.using('default').get(id=tenant_id)
-        db_name = tenant.db_name
-        if db_name not in settings.DATABASES:
-            new_db_config = settings.DATABASES['default'].copy()
-            new_db_config.update({
-                'NAME': tenant.db_name,
-                'USER': tenant.db_user or settings.DATABASES['default'].get('USER'),
-                'PASSWORD': tenant.db_password_hash or settings.DATABASES['default'].get('PASSWORD'),
-                'HOST': tenant.db_host or 'localhost',
-                'PORT': tenant.db_port or 5432,
-            })
-            settings.DATABASES[db_name] = new_db_config
-        return db_name
-    except Exception:
-        return 'default'
 
 def parse_session_datetime(date_str, time_str, default_hour=16):
     if not date_str:
@@ -178,6 +160,7 @@ def parse_session_datetime(date_str, time_str, default_hour=16):
     return datetime.datetime.combine(d, t)
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def session_start_view(request):
     """
     بدء جلسة/حصة جديدة للحلقة وتسجيل الحضور والغياب تلقائياً مع منع تكرار الجلسات لنفس التاريخ
@@ -226,6 +209,18 @@ def session_start_view(request):
         ).first()
 
         if existing_session:
+            if target_date == now_date:
+                # إذا كانت الجلسة مسجلة لنفس حلقة اليوم، نقوم باستئنافها مباشرة بدلاً من رمي خطأ 409
+                return JsonResponse({
+                    "status": "success",
+                    "message": "تم استئناف جلسة اليوم الجارية بنجاح",
+                    "data": {
+                        "session_id": str(existing_session.id),
+                        "session_date": existing_session.session_date.isoformat(),
+                        "is_resumed": True
+                    }
+                }, status=200)
+
             return JsonResponse({
                 "status": "error",
                 "error_code": "SESSION_DATE_CONFLICT",
@@ -333,10 +328,11 @@ def session_start_view(request):
             }, status=409)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء بدء الجلسة", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء بدء الجلسة"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def session_list_view(request):
     """جلب قائمة الجلسات أو إنشاء جلسة جديدة"""
     db_name = get_tenant_db(request)
@@ -378,7 +374,7 @@ def session_list_view(request):
             
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الجلسات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الجلسات"}, status=500)
 
     elif request.method == 'POST':
         try:
@@ -413,6 +409,19 @@ def session_list_view(request):
             ).first()
 
             if existing_session:
+                if date_obj == now_date:
+                    return JsonResponse({
+                        "status": "success",
+                        "message": "تم استئناف جلسة اليوم الجارية بنجاح",
+                        "data": {
+                            "id": str(existing_session.id),
+                            "session_id": str(existing_session.id),
+                            "halaqa_id": str(existing_session.halaqa_id),
+                            "session_date": existing_session.session_date.isoformat(),
+                            "is_resumed": True
+                        }
+                    }, status=200)
+
                 return JsonResponse({
                     "status": "error",
                     "error_code": "SESSION_DATE_CONFLICT",
@@ -457,12 +466,13 @@ def session_list_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء إنشاء الجلسة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء إنشاء الجلسة"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def session_detail_view(request, pk):
     """جلب وتحديث وحذف الجلسة"""
     db_name = get_tenant_db(request)
@@ -507,11 +517,27 @@ def session_detail_view(request, pk):
                 evaluations.append({
                     "id": str(r.id),
                     "page_number": r.page_number,
+                    "lesson_title": r.lesson_title,
+                    "surah_number": r.surah_number,
+                    "is_surah_evaluation": r.is_surah_evaluation,
                     "grade": r.grade,
                     "color_code": r.evaluation_grade.color_code if r.evaluation_grade else None,
                     "requires_repeat": r.requires_repeat,
                     "notes": r.notes or ""
                 })
+            
+            en_data = None
+            if st:
+                en = StudentEnrollment.objects.using(db_name).filter(student=st, is_active=True).first()
+                if en:
+                    en_data = {
+                        "stage_id": str(en.current_stage.id) if en.current_stage else None,
+                        "stage_title": en.current_stage.title if en.current_stage else None,
+                        "part_id": str(en.current_part.id) if en.current_part else None,
+                        "part_title": en.current_part.title if en.current_part else None,
+                        "reached_page": en.reached_page
+                    }
+
             res.append({
                 "attendance_id": str(l.id),
                 "student_id": str(l.student_id),
@@ -522,6 +548,7 @@ def session_detail_view(request, pk):
                 "behavior": getattr(l, 'behavior', None) or 'EXCELLENT',
                 "notes": l.notes,
                 "reached_page": st.reached_page if st else 1,
+                "enrollment": en_data,
                 "evaluations": evaluations
             })
         
@@ -530,6 +557,7 @@ def session_detail_view(request, pk):
         teacher_name = ""
         mosque_name = ""
         project_name = ""
+        project_data = None
         try:
             halaqa = Halaqa.objects.using(db_name).select_related('project', 'center').get(id=session.halaqa_id)
             halaqa_name = halaqa.name or ""
@@ -539,6 +567,32 @@ def session_detail_view(request, pk):
             project = halaqa.project
             if project:
                 project_name = project.title or ""
+                stages_data = []
+                for stg in project.stages.using(db_name).prefetch_related('parts').all().order_by('order', 'created_at'):
+                    stages_data.append({
+                        "id": str(stg.id),
+                        "title": stg.title,
+                        "order": stg.order,
+                        "parts": [
+                            {
+                                "id": str(pt.id),
+                                "title": pt.title,
+                                "part_type": pt.part_type,
+                                "order": pt.order,
+                                "start_page": pt.start_page,
+                                "end_page": pt.end_page
+                            } for pt in stg.parts.all().order_by('order', 'created_at')
+                        ]
+                    })
+
+                project_data = {
+                    "id": str(project.id),
+                    "title": project.title,
+                    "project_type": project.project_type,
+                    "evaluation_unit": getattr(project, 'evaluation_unit', 'PAGES'),
+                    "recitation_direction": getattr(project, 'recitation_direction', 'FORWARD'),
+                    "stages": stages_data
+                }
                 if project.evaluation_template:
                     tmpl = project.evaluation_template
                     grades = EvaluationGrade.objects.using(db_name).filter(template=tmpl).order_by('order', 'id')
@@ -558,6 +612,10 @@ def session_detail_view(request, pk):
         except Halaqa.DoesNotExist:
             pass
 
+        # إرفاق بيانات المشروع مع سجلات الطلاب أيضاً
+        for item in res:
+            item["project"] = project_data
+
         return JsonResponse({
             "status": "success",
             "session_id": str(session.id),
@@ -568,7 +626,9 @@ def session_detail_view(request, pk):
             "teacher_name": teacher_name,
             "mosque_name": mosque_name or "جامع التنعيم",
             "project_name": project_name,
+            "project": project_data,
             "notes": session.notes or '',
+            "is_active": session.is_active,
             "attendance": res,
             "evaluation_template": eval_template_data
         }, status=200)
@@ -687,13 +747,16 @@ def session_detail_view(request, pk):
                             )
 
                     if att:
-                        att.status = st_data.get('status', att.status)
+                        if 'status' in st_data and st_data['status']:
+                            att.status = st_data['status']
                         if 'is_late' in st_data:
                             att.is_late = bool(st_data['is_late'])
-                        att.behavior_score = st_data.get('behavior_score', att.behavior_score)
-                        if 'behavior' in st_data:
+                        if 'behavior_score' in st_data and st_data['behavior_score'] is not None:
+                            att.behavior_score = st_data['behavior_score']
+                        if 'behavior' in st_data and st_data['behavior']:
                             att.behavior = st_data['behavior']
-                        att.notes = st_data.get('notes', att.notes)
+                        if 'notes' in st_data:
+                            att.notes = st_data['notes']
                         att.save(using=db_name)
 
                         if att.status in ['ABSENT', 'EXCUSED']:
@@ -712,19 +775,20 @@ def session_detail_view(request, pk):
                 }
             }, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تحديث الجلسة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تحديث الجلسة"}, status=500)
 
     elif request.method == 'DELETE':
         try:
             session.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف الجلسة بنجاح"}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حذف الجلسة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حذف الجلسة"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def save_schedule_view(request):
     """
     حفظ كامل جدول الجلسات لشهر محدد وحلقة محددة (إضافة، تعديل، حذف)
@@ -833,10 +897,11 @@ def save_schedule_view(request):
 
     except Exception as e:
         traceback.print_exc()
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حفظ الجدول", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حفظ الجدول"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def attendance_list_create_view(request):
     db_name = get_tenant_db(request)
     
@@ -860,7 +925,7 @@ def attendance_list_create_view(request):
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع سجل الحضور", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع سجل الحضور"}, status=500)
 
     elif request.method == 'POST':
         try:
@@ -892,6 +957,6 @@ def attendance_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تسجيل الحضور", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تسجيل الحضور"}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)

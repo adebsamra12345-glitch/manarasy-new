@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CaretUp, CaretDown } from '@phosphor-icons/react';
+import { getSurahName } from '../utils/quranData';
 
 /**
  * Determines color based on color_code or evaluation grade string.
@@ -82,6 +83,16 @@ const PageEvaluationsList = ({ evaluations = [] }) => {
                     const formattedGrade = gradeStr.endsWith('%') || isNaN(gradeStr) 
                         ? gradeStr 
                         : `${gradeStr}%`;
+
+                    let label = '';
+                    if (item.lesson_title) {
+                        label = `${item.lesson_title}`;
+                    } else if (item.is_surah_evaluation || item.surah_number) {
+                        label = item.surah_name || getSurahName(item.surah_number) || `سورة ${item.surah_number}`;
+                    } else {
+                        label = `صفحة ${item.page_number}`;
+                    }
+
                     return (
                         <li 
                             key={item.id || idx} 
@@ -104,7 +115,7 @@ const PageEvaluationsList = ({ evaluations = [] }) => {
                             }}>
                                 ●
                             </span>
-                            <span>Page {item.page_number} ({formattedGrade})</span>
+                            <span>{label} ({formattedGrade})</span>
                         </li>
                     );
                 })}

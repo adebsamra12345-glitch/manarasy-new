@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from core_system.tenants.models import Tenant
 from .models import BackupLog
+from platform_auth.authentication import platform_admin_required
 
 def parse_body(request):
     if not request.body:
@@ -14,6 +15,7 @@ def parse_body(request):
         raise ValueError("بيانات غير صالحة")
 
 @csrf_exempt
+@platform_admin_required
 def backup_list_create_view(request):
     print("\n==========================================")
     print(f"[START] Backups API (core_system.backups): Method={request.method}")
@@ -42,7 +44,7 @@ def backup_list_create_view(request):
         except Exception as e:
             print(f"[ERROR] Failed to query backups: {str(e)}")
             print(traceback.format_exc())
-            return JsonResponse({"status": "error", "message": "فشل استرجاع سجلات النسخ الاحتياطي", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل استرجاع سجلات النسخ الاحتياطي", }, status=500)
 
     elif request.method == 'POST':
         try:
@@ -83,7 +85,7 @@ def backup_list_create_view(request):
         except Exception as e:
             print(f"[ERROR] Backup log recording failed: {str(e)}")
             print(traceback.format_exc())
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند تسجيل النسخة الاحتياطية", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند تسجيل النسخة الاحتياطية", }, status=500)
 
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)

@@ -64,6 +64,7 @@ import ProfilePage from './pages/common/ProfilePage';
 // ===== Global CSS =====
 import './pages/css/global.css';
 import './index.css';
+import './styles/modern.css';
 
 // ─────────────────────────────────────────────
 // الصفحة الرئيسية الافتراضية حسب دور المستخدم

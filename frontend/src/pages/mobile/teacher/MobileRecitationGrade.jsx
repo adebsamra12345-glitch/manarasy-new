@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, CheckCircle, WarningCircle, CaretDown, Plus, Minus, Check, Star, ArrowRight } from '@phosphor-icons/react';
+import { 
+    BookOpen, CheckCircle, WarningCircle, CaretDown, Plus, Minus, 
+    Check, Star, ArrowRight, ArrowsClockwise 
+} from '@phosphor-icons/react';
 import { getStudentsByRing, evaluateRecitation, getEvaluationTemplates, getHalaqat } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { JUZ_AMMA_SURAHS } from '../../../utils/quranData';
 
 /**
  * MobileRecitationGrade — شاشة رصد درجات التسميع والسبر الشاملة للموبايل
@@ -16,12 +20,35 @@ const MobileRecitationGrade = () => {
     const [students, setStudents] = useState([]);
     const [selectedStudentId, setSelectedStudentId] = useState('');
     const [recitationType, setRecitationType] = useState('NEW_MEMORIZATION'); // NEW_MEMORIZATION, MINOR_REVISION, MAJOR_REVISION
+    
+    // Evaluation Modes: PAGE vs SURAH (for Quranic projects)
+    const [evalMode, setEvalMode] = useState('PAGE');
+    const [selectedSurahs, setSelectedSurahs] = useState([]);
+    const [surahFilter, setSurahFilter] = useState('');
+    const [lessonTitle, setLessonTitle] = useState('');
+
     const [pageNumber, setPageNumber] = useState(1);
     const [notes, setNotes] = useState('');
     const [templates, setTemplates] = useState([]);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [feedback, setFeedback] = useState({ error: null, success: null });
+
+    const selectedRing = rings.find(r => String(r.id) === String(selectedRingId));
+    const currentStudent = students.find(s => s.id === selectedStudentId);
+    
+    const isReverse = selectedRing?.recitation_direction === 'REVERSE' || 
+                      currentStudent?.project?.recitation_direction === 'REVERSE';
+    const isCustom = selectedRing?.project_type === 'CUSTOM' || 
+                     currentStudent?.project?.project_type === 'CUSTOM';
+
+    const computeDefaultPage = (st, ring) => {
+        const rev = ring?.recitation_direction === 'REVERSE' || st?.project?.recitation_direction === 'REVERSE';
+        if (rev) {
+            return (st?.reached_page && st.reached_page > 1) ? st.reached_page - 1 : 604;
+        }
+        return (st?.reached_page || 1) + 1;
+    };
 
     useEffect(() => {
         const fetchInitial = async () => {
@@ -51,7 +78,7 @@ const MobileRecitationGrade = () => {
                     setStudents(stList);
                     if (stList.length > 0 && !selectedStudentId) {
                         setSelectedStudentId(stList[0].id);
-                        setPageNumber((stList[0].reached_page || 1) + 1);
+                        setPageNumber(computeDefaultPage(stList[0], selectedRing));
                     }
                 }
             } catch (err) {
@@ -67,9 +94,31 @@ const MobileRecitationGrade = () => {
         setSelectedStudentId(stId);
         const st = students.find(s => s.id === stId);
         if (st) {
-            setPageNumber((st.reached_page || 1) + 1);
+            setPageNumber(computeDefaultPage(st, selectedRing));
         }
     };
+
+    const handleToggleSurah = (surah) => {
+        setSelectedSurahs(prev => {
+            const exists = prev.includes(surah.number);
+            let updated;
+            if (exists) {
+                updated = prev.filter(num => num !== surah.number);
+            } else {
+                updated = [...prev, surah.number];
+            }
+            if (updated.length > 0) {
+                const primary = JUZ_AMMA_SURAHS.find(s => s.number === updated[0]);
+                if (primary) setPageNumber(primary.page);
+            }
+            return updated;
+        });
+    };
+
+    const filteredSurahs = JUZ_AMMA_SURAHS.filter(s => 
+        s.name.includes(surahFilter.trim()) || 
+        String(s.number).includes(surahFilter.trim())
+    );
 
     const handleGradeSubmit = async (gradeObj) => {
         if (!selectedStudentId) {
@@ -77,12 +126,15 @@ const MobileRecitationGrade = () => {
             return;
         }
 
+        if (!isCustom && evalMode === 'SURAH' && selectedSurahs.length === 0) {
+            setFeedback({ error: 'الرجاء اختيار سورة واحدة على الأقل من جزء عم', success: null });
+            return;
+        }
+
         setSubmitting(true);
         setFeedback({ error: null, success: null });
 
         try {
-            const selectedStudent = students.find(s => s.id === selectedStudentId);
-
             const payload = {
                 student_id: selectedStudentId,
                 page_number: pageNumber,
@@ -92,12 +144,27 @@ const MobileRecitationGrade = () => {
                 recitation_type: recitationType
             };
 
+            if (isCustom && lessonTitle.trim()) {
+                payload.lesson_title = lessonTitle.trim();
+            }
+
+            if (!isCustom && evalMode === 'SURAH' && selectedSurahs.length > 0) {
+                payload.is_surah_evaluation = true;
+                if (selectedSurahs.length === 1) {
+                    payload.surah_number = selectedSurahs[0];
+                } else {
+                    payload.surahs_list = selectedSurahs;
+                }
+            }
+
             const response = await evaluateRecitation(payload);
 
             if (response.status === 'success') {
                 const data = response.data;
                 setFeedback({ error: null, success: response.message || 'تم تسجيل درجة التسميع بنجاح!' });
                 setNotes('');
+                if (isCustom) setLessonTitle('');
+                setSelectedSurahs([]);
 
                 // Update local list
                 setStudents(prev => prev.map(s => s.id === selectedStudentId ? { ...s, reached_page: data.reached_page || pageNumber } : s));
@@ -125,8 +192,6 @@ const MobileRecitationGrade = () => {
             { id: '4', name: 'إعادة التسميع', color_code: '#d32f2f' },
         ];
 
-    const currentStudent = students.find(s => s.id === selectedStudentId);
-
     return (
         <div style={{ padding: '1rem', paddingBottom: '5rem', direction: 'rtl', fontFamily: 'inherit' }}>
             {/* Header Navigation */}
@@ -137,7 +202,14 @@ const MobileRecitationGrade = () => {
                 >
                     <ArrowRight size={20} color="#133315" />
                 </button>
-                <h2 style={{ fontSize: '1.2rem', color: '#133315', margin: 0, fontWeight: 'bold' }}>رصد درجة التسميع والسبر</h2>
+                <div style={{ textAlign: 'center' }}>
+                    <h2 style={{ fontSize: '1.2rem', color: '#133315', margin: 0, fontWeight: 'bold' }}>رصد درجات التسميع</h2>
+                    {isReverse && (
+                        <span style={{ fontSize: '0.72rem', color: '#e65100', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                            <ArrowsClockwise size={12} /> تسميع عكسي (تنازلي)
+                        </span>
+                    )}
+                </div>
                 <div style={{ width: 32 }}></div>
             </div>
 
@@ -255,10 +327,117 @@ const MobileRecitationGrade = () => {
                 </div>
             </div>
 
+            {/* Custom Project Lesson Title */}
+            {isCustom && (
+                <div style={{ background: '#fff', padding: '1rem', borderRadius: '14px', border: '1px solid #eee', marginBottom: '1rem' }}>
+                    <label style={{ fontSize: '0.85rem', color: '#133315', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>
+                        عنوان الدرس / المحتوى المخصص:
+                    </label>
+                    <input
+                        type="text"
+                        placeholder="مثال: مخارج الحروف وصفاتها..."
+                        value={lessonTitle}
+                        onChange={e => setLessonTitle(e.target.value)}
+                        style={{
+                            width: '100%',
+                            padding: '0.65rem',
+                            borderRadius: '8px',
+                            border: '1.5px solid #81b255',
+                            fontSize: '0.88rem',
+                            outline: 'none',
+                            boxSizing: 'border-box'
+                        }}
+                    />
+                </div>
+            )}
+
+            {/* Evaluation Mode Toggle (Quranic: Pages vs Short Surahs) */}
+            {!isCustom && (
+                <div style={{ display: 'flex', background: '#e8f5e9', borderRadius: '10px', padding: '3px', marginBottom: '1rem' }}>
+                    <button
+                        type="button"
+                        onClick={() => setEvalMode('PAGE')}
+                        style={{
+                            flex: 1, padding: '0.5rem', border: 'none', borderRadius: '8px',
+                            fontWeight: 'bold', fontSize: '0.82rem', cursor: 'pointer',
+                            background: evalMode === 'PAGE' ? '#fff' : 'transparent',
+                            color: evalMode === 'PAGE' ? '#2e7d32' : '#666',
+                            boxShadow: evalMode === 'PAGE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                    >
+                        التسميع بالصفحات
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setEvalMode('SURAH')}
+                        style={{
+                            flex: 1, padding: '0.5rem', border: 'none', borderRadius: '8px',
+                            fontWeight: 'bold', fontSize: '0.82rem', cursor: 'pointer',
+                            background: evalMode === 'SURAH' ? '#fff' : 'transparent',
+                            color: evalMode === 'SURAH' ? '#2e7d32' : '#666',
+                            boxShadow: evalMode === 'SURAH' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                    >
+                        قصار السور (جزء عم)
+                    </button>
+                </div>
+            )}
+
+            {/* Short Surahs Selector */}
+            {!isCustom && evalMode === 'SURAH' && (
+                <div style={{ background: '#fff', padding: '1rem', borderRadius: '14px', border: '1px solid #eee', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#133315' }}>سور جزء عم (78-114):</span>
+                        {selectedSurahs.length > 0 && (
+                            <span style={{ fontSize: '0.75rem', background: '#e8f5e9', color: '#2e7d32', padding: '0.15rem 0.5rem', borderRadius: '10px', fontWeight: 'bold' }}>
+                                تم اختيار {selectedSurahs.length}
+                            </span>
+                        )}
+                    </div>
+
+                    <input
+                        type="text"
+                        placeholder="ابحث عن سورة..."
+                        value={surahFilter}
+                        onChange={e => setSurahFilter(e.target.value)}
+                        style={{
+                            width: '100%', padding: '0.45rem', borderRadius: '8px',
+                            border: '1px solid #ddd', fontSize: '0.82rem', marginBottom: '0.6rem',
+                            outline: 'none', boxSizing: 'border-box'
+                        }}
+                    />
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', maxHeight: '140px', overflowY: 'auto' }}>
+                        {filteredSurahs.map(surah => {
+                            const isSelected = selectedSurahs.includes(surah.number);
+                            return (
+                                <button
+                                    key={surah.number}
+                                    type="button"
+                                    onClick={() => handleToggleSurah(surah)}
+                                    style={{
+                                        padding: '0.3rem 0.6rem',
+                                        borderRadius: '8px',
+                                        fontSize: '0.78rem',
+                                        fontWeight: isSelected ? 'bold' : 'normal',
+                                        border: `1px solid ${isSelected ? '#2e7d32' : '#ddd'}`,
+                                        background: isSelected ? '#2e7d32' : '#f9f9f9',
+                                        color: isSelected ? '#fff' : '#333',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {surah.name} ({surah.number})
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
             {/* Target Page Selector */}
             <div style={{ background: '#fff', padding: '1.25rem', borderRadius: '16px', border: '1px solid #eee', textAlign: 'center', marginBottom: '1rem' }}>
                 <span style={{ fontSize: '0.85rem', color: '#666', fontWeight: 500, display: 'block', marginBottom: '0.5rem' }}>
-                    رقم الصفحة المراد تقييمها
+                    {isCustom ? 'رقم الدرس / الصفحة المراد تقييمها' : 'رقم الصفحة في المصحف'}
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem', marginBottom: '0.5rem' }}>
                     <button
@@ -269,7 +448,7 @@ const MobileRecitationGrade = () => {
                     </button>
                     <span style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#f57c00' }}>{pageNumber}</span>
                     <button
-                        onClick={() => setPageNumber(prev => prev + 1)}
+                        onClick={() => setPageNumber(prev => Math.min(604, prev + 1))}
                         style={{ width: 42, height: 42, borderRadius: '50%', border: '1px solid #ddd', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                     >
                         <Plus size={20} color="#133315" />

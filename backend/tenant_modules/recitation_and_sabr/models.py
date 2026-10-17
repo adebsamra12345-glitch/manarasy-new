@@ -26,6 +26,9 @@ class RecitationLog(models.Model):
     tajweed_mistakes_count = models.IntegerField(default=0)
     audio_note_s3_url = models.TextField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
+    lesson_title = models.CharField(max_length=255, null=True, blank=True)
+    surah_number = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_surah_evaluation = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

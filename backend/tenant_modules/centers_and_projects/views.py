@@ -4,6 +4,7 @@ import traceback
 import jwt
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from core_system.auth import get_tenant_db
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -52,29 +53,6 @@ def is_admin_or_center_manager(request):
         return role in ['TENANT_ADMIN', 'CENTER_MANAGER']
     except Exception:
         return False
-
-def get_tenant_db(request):
-    """استخراج اسم قاعدة بيانات المسجد وتجهيز الاتصال بها ديناميكياً"""
-    tenant_id = request.headers.get('Tenant-ID')
-    if not tenant_id:
-        raise ValueError("ترويسة Tenant-ID مفقودة في الطلب")
-    
-    tenant = Tenant.objects.using('default').get(id=tenant_id)
-    db_name = tenant.db_name
-    
-    if db_name not in settings.DATABASES:
-        new_db_config = settings.DATABASES['default'].copy()
-        new_db_config.update({
-            'NAME': tenant.db_name,
-            'USER': tenant.db_user,
-            'PASSWORD': tenant.db_password_hash,
-            'HOST': tenant.db_host,
-            'PORT': tenant.db_port,
-        })
-        settings.DATABASES[db_name] = new_db_config
-        
-    return db_name
-
 
 # قائمة الأجزاء القرآنية الـ 30 الافتراضية بنطاق صفحاتها القياسي
 QURAN_JUZ_PRESETS = [
@@ -374,7 +352,7 @@ def center_list_create_view(request):
             res = get_centers_summary_data(centers_qs, db_name)
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع المراكز", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع المراكز"}, status=500)
 
     elif request.method == 'POST':
         if not is_tenant_admin(request):
@@ -421,7 +399,7 @@ def center_list_create_view(request):
                 "data": created_data[0] if created_data else {"id": str(center.id), "name": center.name, "code": center.code}
             }, status=201)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إنشاء المركز", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إنشاء المركز"}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -564,7 +542,7 @@ def center_detail_view(request, pk):
                 "data": updated_list[0] if updated_list else {"id": str(center.id), "name": center.name, "code": center.code}
             })
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل بيانات المركز", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل بيانات المركز"}, status=500)
 
     elif request.method == 'DELETE':
         if not is_tenant_admin(request):
@@ -573,7 +551,7 @@ def center_detail_view(request, pk):
             center.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف المركز بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف المركز", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف المركز"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -680,6 +658,8 @@ def serialize_project(project):
         "title": project.title,
         "description": project.description,
         "project_type": project.project_type,
+        "evaluation_unit": getattr(project, 'evaluation_unit', 'PAGES'),
+        "recitation_direction": getattr(project, 'recitation_direction', 'FORWARD'),
         "is_global": project.is_global,
         "require_exam_for_all_stages": project.require_exam_for_all_stages,
         "evaluation_template_id": str(eval_tmpl.id) if eval_tmpl else None,
@@ -839,13 +819,14 @@ def project_list_create_view(request):
             res = [serialize_project(p) for p in projects]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "خطأ عند استرجاع المشاريع", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "خطأ عند استرجاع المشاريع"}, status=500)
 
     elif request.method == 'POST':
         try:
             data = parse_body(request)
             title = data.get('title')
             project_type = data.get('project_type', 'QURAN')
+            recitation_direction = data.get('recitation_direction', 'FORWARD')
             is_global = data.get('is_global', False)
             require_exam_for_all_stages = data.get('require_exam_for_all_stages', False)
             evaluation_template_id = data.get('evaluation_template_id')
@@ -932,10 +913,16 @@ def project_list_create_view(request):
                             "message": "عذراً، لا يوجد أي نموذج امتحان مضاف في المنصة بعد. يرجى إضافة نموذج امتحان أولاً من قسم الامتحانات قبل تفعيل امتحان المرحلة."
                         }, status=400)
 
+            evaluation_unit = data.get('evaluation_unit', 'PAGES')
+            if evaluation_unit not in ['PAGES', 'LESSONS', 'TOPICS']:
+                evaluation_unit = 'PAGES'
+
             project = Project.objects.using(db_name).create(
                 title=clean_title,
                 description=data.get('description'),
                 project_type=project_type,
+                evaluation_unit=evaluation_unit,
+                recitation_direction=recitation_direction,
                 is_global=is_global,
                 require_exam_for_all_stages=require_exam_for_all_stages,
                 evaluation_template=eval_template,
@@ -961,7 +948,7 @@ def project_list_create_view(request):
                 "data": serialize_project(project)
             }, status=201)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند حفظ المشروع", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند حفظ المشروع"}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -996,6 +983,12 @@ def project_detail_view(request, pk):
             project.title = data.get('title', project.title)
             project.description = data.get('description', project.description)
             project.project_type = data.get('project_type', project.project_type)
+            if 'evaluation_unit' in data:
+                e_unit = data.get('evaluation_unit')
+                if e_unit in ['PAGES', 'LESSONS', 'TOPICS']:
+                    project.evaluation_unit = e_unit
+            if 'recitation_direction' in data:
+                project.recitation_direction = data.get('recitation_direction', project.recitation_direction)
             project.is_global = is_global
             if 'evaluation_template_id' in data:
                 eval_tmpl_id = data['evaluation_template_id']
@@ -1060,7 +1053,7 @@ def project_detail_view(request, pk):
 
             return JsonResponse({"status": "success", "message": "تم تعديل بيانات المشروع بنجاح", "data": serialize_project(project)})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل المشروع", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل المشروع"}, status=500)
 
     elif request.method == 'PATCH':
         try:
@@ -1075,7 +1068,7 @@ def project_detail_view(request, pk):
                 return JsonResponse({"status": "success", "message": f"تم {state} المشروع بنجاح"})
             return JsonResponse({"status": "error", "message": "يجب تمرير حالة is_active"}, status=400)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تغيير حالة المشروع", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تغيير حالة المشروع"}, status=500)
 
     elif request.method == 'DELETE':
         if not check_project_permission(request, db_name, project=project):
@@ -1085,7 +1078,7 @@ def project_detail_view(request, pk):
             project.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف المشروع نهائياً بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف المشروع", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف المشروع"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1163,7 +1156,7 @@ def stage_list_create_view(request, project_id):
 
             return JsonResponse({"status": "success", "message": "تم إضافة المرحلة بنجاح", "data": serialize_stage(stage)}, status=201)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إضافة المرحلة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إضافة المرحلة"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1209,14 +1202,14 @@ def stage_detail_view(request, stage_id):
             stage.save(using=db_name)
             return JsonResponse({"status": "success", "message": "تم تعديل المرحلة بنجاح", "data": serialize_stage(stage)})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل المرحلة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل المرحلة"}, status=500)
 
     elif request.method == 'DELETE':
         try:
             stage.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف المرحلة بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف المرحلة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف المرحلة"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1232,6 +1225,23 @@ def part_list_create_view(request, stage_id):
         stage = ProjectStage.objects.using(db_name).get(id=stage_id)
     except ProjectStage.DoesNotExist:
         return JsonResponse({"status": "error", "message": "المرحلة المطلوبة غير موجودة"}, status=404)
+
+    if request.method == 'GET':
+        parts = stage.parts.using(db_name).all().order_by('order', 'created_at')
+        return JsonResponse({
+            "status": "success",
+            "data": [
+                {
+                    "id": str(p.id),
+                    "title": p.title,
+                    "part_type": p.part_type,
+                    "juz_number": p.juz_number,
+                    "start_page": p.start_page,
+                    "end_page": p.end_page,
+                    "order": p.order
+                } for p in parts
+            ]
+        }, status=200)
 
     if not check_project_permission(request, db_name, project=stage.project):
         return JsonResponse({"status": "error", "message": "صلاحيات غير كافية لإضافة جزء في هذه المرحلة"}, status=403)
@@ -1280,7 +1290,7 @@ def part_list_create_view(request, stage_id):
                 }
             }, status=201)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إضافة الجزء", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إضافة الجزء"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1312,14 +1322,14 @@ def part_detail_view(request, part_id):
             part.save(using=db_name)
             return JsonResponse({"status": "success", "message": "تم تعديل بيانات الجزء بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل الجزء", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل الجزء"}, status=500)
 
     elif request.method == 'DELETE':
         try:
             part.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف الجزء بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف الجزء", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف الجزء"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1368,7 +1378,7 @@ def evaluation_template_list_create_view(request):
             res = [serialize_evaluation_template(t) for t in templates]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب نماذج التقييم", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب نماذج التقييم"}, status=500)
 
     elif request.method == 'POST':
         if not is_admin_or_center_manager(request):
@@ -1415,7 +1425,7 @@ def evaluation_template_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إنشاء نموذج التقييم", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إنشاء نموذج التقييم"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1485,7 +1495,7 @@ def evaluation_template_detail_view(request, pk):
             }, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل نموذج التقييم", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل نموذج التقييم"}, status=500)
 
     elif request.method == 'DELETE':
         if not is_admin_or_center_manager(request):
@@ -1495,7 +1505,7 @@ def evaluation_template_detail_view(request, pk):
             tmpl.save(using=db_name)
             return JsonResponse({"status": "success", "message": "تم إلغاء تنشيط (حذف) نموذج التقييم بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف نموذج التقييم", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف نموذج التقييم"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1543,7 +1553,7 @@ def evaluation_grade_create_view(request, template_id):
     except EvaluationTemplate.DoesNotExist:
         return JsonResponse({"status": "error", "message": "نموذج التقييم غير موجود"}, status=404)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشل إضافة التقييم", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشل إضافة التقييم"}, status=500)
 
 
 @csrf_exempt
@@ -1584,14 +1594,14 @@ def evaluation_grade_detail_view(request, pk):
                 "data": serialize_evaluation_grade(grade)
             }, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تحديث التقييم", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تحديث التقييم"}, status=500)
 
     elif request.method == 'DELETE':
         try:
             grade.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف التقييم بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف التقييم", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف التقييم"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1638,7 +1648,7 @@ def test_rubric_list_create_view(request):
             res = [serialize_test_rubric(r) for r in rubrics]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب سلالم الاختبارات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب سلالم الاختبارات"}, status=500)
 
     elif request.method == 'POST':
         if not is_admin_or_center_manager(request):
@@ -1681,7 +1691,7 @@ def test_rubric_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إنشاء سلم الاختبار", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إنشاء سلم الاختبار"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1739,7 +1749,7 @@ def test_rubric_detail_view(request, pk):
             }, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل سلم الاختبار", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل سلم الاختبار"}, status=500)
 
     elif request.method == 'DELETE':
         if not is_admin_or_center_manager(request):
@@ -1749,7 +1759,7 @@ def test_rubric_detail_view(request, pk):
             rubric.save(using=db_name)
             return JsonResponse({"status": "success", "message": "تم إلغاء تنشيط (حذف) سلم الاختبار بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف سلم الاختبار", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف سلم الاختبار"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1797,7 +1807,7 @@ def rubric_error_type_create_view(request, rubric_id):
     except TestRubric.DoesNotExist:
         return JsonResponse({"status": "error", "message": "سلم الاختبار غير موجود"}, status=404)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشل إضافة نوع الخطأ", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشل إضافة نوع الخطأ"}, status=500)
 
 
 @csrf_exempt
@@ -1836,14 +1846,14 @@ def rubric_error_type_detail_view(request, pk):
                 "data": serialize_rubric_error_type(err_obj)
             }, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تحديث نوع الخطأ", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تحديث نوع الخطأ"}, status=500)
 
     elif request.method == 'DELETE':
         try:
             err_obj.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف نوع الخطأ بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف نوع الخطأ", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف نوع الخطأ"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -1892,7 +1902,7 @@ def exam_template_list_create_view(request):
             res = [serialize_exam_template(t) for t in templates]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع نماذج الامتحانات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع نماذج الامتحانات"}, status=500)
 
     elif request.method == 'POST':
         if not is_admin_or_center_manager(request):
@@ -1942,7 +1952,7 @@ def exam_template_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إضافة نموذج الامتحان", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إضافة نموذج الامتحان"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -2010,7 +2020,7 @@ def exam_template_detail_view(request, pk):
             }, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تعديل نموذج الامتحان", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تعديل نموذج الامتحان"}, status=500)
 
     elif request.method == 'DELETE':
         if not is_admin_or_center_manager(request):
@@ -2020,7 +2030,7 @@ def exam_template_detail_view(request, pk):
             tmpl.save(using=db_name)
             return JsonResponse({"status": "success", "message": "تم إلغاء تنشيط (حذف) نموذج الامتحان بنجاح"})
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف نموذج الامتحان", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف نموذج الامتحان"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -2096,7 +2106,7 @@ def student_exam_schedule_view(request):
         }, status=200)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشل تحديد موعد الامتحان", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشل تحديد موعد الامتحان"}, status=500)
 
 
 @csrf_exempt
@@ -2177,7 +2187,7 @@ def student_exam_submit_view(request):
         }, status=200)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشل تسجيل نتيجة الامتحان", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشل تسجيل نتيجة الامتحان"}, status=500)
 
 
 @csrf_exempt
@@ -2200,7 +2210,7 @@ def system_notifications_view(request):
             } for n in notifications]
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الإشعارات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الإشعارات"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -2331,7 +2341,7 @@ def mosque_schedule_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل إضافة الجلسة في الجدول", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل إضافة الجلسة في الجدول"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -2406,14 +2416,14 @@ def mosque_schedule_detail_view(request, pk):
                 }
             }, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل تحديث الجلسة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل تحديث الجلسة"}, status=500)
 
     elif request.method == 'DELETE':
         try:
             schedule.delete(using=db_name)
             return JsonResponse({"status": "success", "message": "تم حذف الجلسة من الجدول بنجاح"}, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "فشل حذف الجلسة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل حذف الجلسة"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
@@ -2492,4 +2502,4 @@ def mosque_schedule_bulk_save_view(request):
         }, status=200)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حفظ جدول الجلسات", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حفظ جدول الجلسات"}, status=500)

@@ -18,7 +18,7 @@ export const StatusBadge = ({ status }) => {
     return <span className={`pl-badge ${meta.tone}`}>{meta.label}</span>;
 };
 
-const RegistrationRequests = () => {
+const DesktopRegistrationRequests = () => {
     const [filter, setFilter] = useState('PENDING_APPROVAL');
     const [q, setQ] = useState('');
     const [debouncedQ, setDebouncedQ] = useState('');
@@ -27,8 +27,6 @@ const RegistrationRequests = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [selectedId, setSelectedId] = useState(null);
-    const { isMobile } = useDeviceType();
-    if (isMobile) return <MobileRegistrationRequests />;
     // Debounce للبحث
     useEffect(() => {
         const t = setTimeout(() => { setDebouncedQ(q.trim()); setPage(1); }, 350);
@@ -285,5 +283,15 @@ const RequestDetail = ({ id, onClose, onChanged }) => {
 const Info = ({ label, children }) => (
     <div className="pl-info"><span className="pl-muted sm">{label}</span><div>{children}</div></div>
 );
+
+const RegistrationRequests = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileRegistrationRequests />;
+    }
+
+    return <DesktopRegistrationRequests />;
+};
 
 export default RegistrationRequests;

@@ -11,13 +11,7 @@ import useDeviceType from '../../../hooks/useDeviceType';
 import MobileStudentActivityPage from '../../mobile/tenantAdmin/MobileStudentActivityPage';
 import './studentActivityPage.css';
 
-const StudentActivityPage = () => {
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileStudentActivityPage />;
-    }
-
+const DesktopStudentActivityPage = () => {
     const { studentId } = useParams();
     const navigate = useNavigate();
 
@@ -451,6 +445,16 @@ const StudentActivityPage = () => {
             )}
         </div>
     );
+};
+
+const StudentActivityPage = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileStudentActivityPage />;
+    }
+
+    return <DesktopStudentActivityPage />;
 };
 
 export default StudentActivityPage;

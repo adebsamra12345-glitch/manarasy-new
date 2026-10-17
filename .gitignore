@@ -16,3 +16,6 @@ frontend/dist/
 backend/media/
 backend/staticfiles/
 backend/dbdump.json
+
+# Claude Code local worktrees/state
+.claude/

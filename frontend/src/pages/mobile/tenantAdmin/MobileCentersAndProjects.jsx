@@ -6,11 +6,10 @@ import MobileTestsModule from './tests/MobileTestsModule';
 const MobileCentersAndProjects = () => {
     // التبويب الرئيسي: 'projects' (المشاريع) أو 'exams' (الاختبارات)
     const [activeTab, setActiveTab] = useState('projects');
-    const [selectedCenters, setSelectedCenters] = useState([]);
-    const availableCenters = centersList.filter(c => c.id !== 'all');
-
     const [projects, setProjects] = useState([]);
     const [centersList, setCentersList] = useState([{ id: 'all', name: 'المركز الرئيسي' }]);
+    const [selectedCenters, setSelectedCenters] = useState([]);
+    const availableCenters = centersList.filter(c => c.id !== 'all');
     const [selectedCenterId, setSelectedCenterId] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [loading, setLoading] = useState(true);
@@ -23,6 +22,7 @@ const MobileCentersAndProjects = () => {
     const [projectTitle, setProjectTitle] = useState('');
     const [projectDesc, setProjectDesc] = useState('');
     const [projectType, setProjectType] = useState('QURAN');
+    const [evaluationUnit, setEvaluationUnit] = useState('PAGES'); // 'PAGES' | 'LESSONS' | 'TOPICS'
     const [isGlobal, setIsGlobal] = useState(true);
     const [requireExam, setRequireExam] = useState(false);
     const [selectedEvalId, setSelectedEvalId] = useState('');
@@ -61,6 +61,7 @@ const MobileCentersAndProjects = () => {
         setProjectTitle('');
         setProjectDesc('');
         setProjectType('QURAN');
+        setEvaluationUnit('PAGES');
         setIsGlobal(true);
         setRequireExam(false);
         if (evaluationTemplates.length > 0) setSelectedEvalId(evaluationTemplates[0].id);
@@ -69,14 +70,6 @@ const MobileCentersAndProjects = () => {
         setErrorMsg('');
         setIsProjectModalOpen(true);
         setSelectedCenters(availableCenters.map(c => c.id));
-        // في handleOpenEditProjectModal:
-        if (proj.is_global) {
-            setSelectedCenters(availableCenters.map(c => c.id));
-        } else if (proj.centers?.length > 0) {
-            setSelectedCenters(proj.centers.map(c => c.id));
-        } else {
-            setSelectedCenters([]);
-        }
     };
     const handleToggleGlobal = (checked) => {
         setIsGlobal(checked);
@@ -113,6 +106,7 @@ const MobileCentersAndProjects = () => {
             title: projectTitle.trim(),
             description: projectDesc,
             project_type: projectType,
+            evaluation_unit: projectType === 'CUSTOM' ? evaluationUnit : 'PAGES',
             is_global: isGlobal,
             require_exam_for_all_stages: requireExam,
             evaluation_template_id: selectedEvalId,
@@ -153,10 +147,19 @@ const MobileCentersAndProjects = () => {
         setProjectTitle(proj.title || '');
         setProjectDesc(proj.description || '');
         setProjectType(proj.project_type || 'QURAN');
-        setIsGlobal(proj.is_global ?? true);
+        setEvaluationUnit(proj.evaluation_unit || 'PAGES');
+        const isProjGlobal = proj.is_global ?? true;
+        setIsGlobal(isProjGlobal);
         setRequireExam(proj.require_exam_for_all_stages || false);
         setSelectedEvalId(proj.evaluation_template_id || proj.evaluation_template?.id || '');
         setSelectedRubricId(proj.test_rubric_id || proj.test_rubric?.id || '');
+        if (isProjGlobal) {
+            setSelectedCenters(availableCenters.map(c => c.id));
+        } else if (proj.centers?.length > 0) {
+            setSelectedCenters(proj.centers.map(c => c.id));
+        } else {
+            setSelectedCenters([]);
+        }
         setErrorMsg('');
         setIsProjectModalOpen(true);
     };
@@ -345,10 +348,21 @@ const MobileCentersAndProjects = () => {
                                 <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>نوع المشروع</label>
                                 <select value={projectType} onChange={e => setProjectType(e.target.value)} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd', background: '#fff' }}>
                                     <option value="QURAN">قرآن كريم</option>
+                                    <option value="CUSTOM">مشروع منهجي مخصص</option>
                                     <option value="TAJWEED">تجويد</option>
                                     <option value="ISLAMIC_STUDIES">دراسات إسلامية</option>
                                 </select>
                             </div>
+                            {projectType === 'CUSTOM' && (
+                                <div>
+                                    <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>وحدة التقييم للمشروع</label>
+                                    <select value={evaluationUnit} onChange={e => setEvaluationUnit(e.target.value)} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1.5px solid #a5d6a7', background: '#fff' }}>
+                                        <option value="PAGES">📖 صفحات (تقييم بالصفحات)</option>
+                                        <option value="LESSONS">📑 دروس مخصصة (تقييم بالدروس)</option>
+                                        <option value="TOPICS">🎯 محاور مخصصة (تقييم بالمحاور)</option>
+                                    </select>
+                                </div>
+                            )}
                             <div>
                                 <label style={{ fontSize: '0.9rem', fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>نموذج التقييم</label>
                                 <select value={selectedEvalId} onChange={e => setSelectedEvalId(e.target.value)} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd', background: '#fff' }}>

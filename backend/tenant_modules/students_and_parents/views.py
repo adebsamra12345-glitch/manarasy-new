@@ -2,6 +2,7 @@ import json
 import traceback
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from core_system.auth import tenant_auth, get_tenant_db
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q
@@ -20,32 +21,8 @@ def parse_body(request):
     except json.JSONDecodeError:
         raise ValueError("صيغة بيانات غير صالحة")
 
-def get_tenant_db(request):
-    tenant_id = request.headers.get('Tenant-ID')
-    if not tenant_id:
-        return 'default'
-    try:
-        from core_system.tenants.models import Tenant
-        tenant = Tenant.objects.using('default').get(id=tenant_id)
-        db_name = tenant.db_name
-        if db_name not in settings.DATABASES:
-            new_db_config = settings.DATABASES['default'].copy()
-            new_db_config.update({
-                'NAME': tenant.db_name,
-                'USER': tenant.db_user or settings.DATABASES['default'].get('USER'),
-                'PASSWORD': tenant.db_password_hash or settings.DATABASES['default'].get('PASSWORD'),
-                'HOST': tenant.db_host or 'localhost',
-                'PORT': tenant.db_port or 5432,
-            })
-            settings.DATABASES[db_name] = new_db_config
-        return db_name
-    except Exception:
-        return 'default'
-
-
-
-
 @csrf_exempt
+@tenant_auth()
 def student_list_create_view(request):
     db_name = get_tenant_db(request)
 
@@ -84,7 +61,11 @@ def student_list_create_view(request):
                         elif username:
                             prof = UserProfile.objects.using(db_name).filter(user__username=username).first()
                         if prof and prof.center:
-                            queryset = queryset.filter(Q(halaqa__center=prof.center) | Q(enrollments__halaqa__center=prof.center)).distinct()
+                            queryset = queryset.filter(
+                                Q(halaqa__center=prof.center) |
+                                Q(enrollments__halaqa__center=prof.center) |
+                                Q(halaqa__isnull=True)
+                            ).distinct()
                         else:
                             queryset = queryset.none()
                 except Exception:
@@ -93,7 +74,7 @@ def student_list_create_view(request):
             if halaqa_id and halaqa_id != 'all':
                 queryset = queryset.filter(halaqa_id=halaqa_id)
             if center_id and center_id != 'all':
-                queryset = queryset.filter(halaqa__center_id=center_id)
+                queryset = queryset.filter(Q(halaqa__center_id=center_id) | Q(enrollments__halaqa__center_id=center_id)).distinct()
             if gender and gender != 'all':
                 queryset = queryset.filter(gender=gender)
             if search:
@@ -172,7 +153,7 @@ def student_list_create_view(request):
             return JsonResponse({"status": "success", "count": len(res), "data": res}, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع ملفات الطلاب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع ملفات الطلاب"}, status=500)
 
     elif request.method == 'POST':
         try:
@@ -271,12 +252,13 @@ def student_list_create_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند إضافة الطالب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند إضافة الطالب"}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
 @csrf_exempt
+@tenant_auth()
 def student_detail_view(request, pk):
     db_name = get_tenant_db(request)
     try:
@@ -435,7 +417,7 @@ def student_detail_view(request, pk):
             }, status=200)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تعديل بيانات الطالب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تعديل بيانات الطالب"}, status=500)
 
     elif request.method == 'DELETE':
         try:
@@ -449,12 +431,13 @@ def student_detail_view(request, pk):
                 "message": f"تم حذف ملف الطالب '{student_name}' وحسابه بنجاح"
             }, status=200)
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حذف الطالب", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حذف الطالب"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
 @csrf_exempt
+@tenant_auth()
 def student_registration_request_view(request):
     """
     GET   — يجلب قائمة طلبات التسجيل والتعديل الخاصة بالمعلم أو الإدارة.
@@ -560,7 +543,7 @@ def student_registration_request_view(request):
                 })
             return JsonResponse({'status': 'success', 'count': len(data), 'data': data}, status=200)
         except Exception as exc:
-            return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء جلب الطلبات', 'details': str(exc)}, status=500)
+            return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء جلب الطلبات'}, status=500)
 
     elif request.method == 'POST':
         try:
@@ -653,12 +636,13 @@ def student_registration_request_view(request):
             }, status=201)
 
         except Exception as e:
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء إرسال طلب التسجيل", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء إرسال طلب التسجيل"}, status=500)
 
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
 @csrf_exempt
+@tenant_auth()
 def cancel_student_registration_request_view(request, request_id):
     """
     إلغاء/التراجع عن طلب التسجيل/التعديل بواسطة المعلم.
@@ -724,6 +708,7 @@ def cancel_student_registration_request_view(request, request_id):
 
 
 @csrf_exempt
+@tenant_auth()
 def cancel_student_deletion_request_view(request, request_id):
     """
     إلغاء/التراجع عن طلب حذف طالب بواسطة المعلم.
@@ -820,6 +805,7 @@ def cancel_student_deletion_request_view(request, request_id):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_enrollment_view(request):
     """
     إسناد الطالب إلى حلقة قرآنية وتحديد/تحديث معلومات الحفظ (صفحة الوصول والمشروع والمرحلة والجزء)
@@ -929,7 +915,7 @@ def student_enrollment_view(request):
         }, status=201 if created else 200)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تسجيل الطالب في الحلقة", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تسجيل الطالب في الحلقة"}, status=500)
 
 from django.db.models import Avg
 from datetime import date
@@ -937,6 +923,7 @@ from dateutil.relativedelta import relativedelta
 from .models import EvaluationLog
 
 @csrf_exempt
+@tenant_auth()
 def student_evaluation_summary_view(request, student_id):
     if request.method != 'GET':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -980,6 +967,7 @@ def student_evaluation_summary_view(request, student_id):
         return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
 @csrf_exempt
+@tenant_auth()
 def record_evaluation_view(request):
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -1026,6 +1014,7 @@ def record_evaluation_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_deletion_request_view(request):
     """
     POST  — ينشئ طلب حذف طالب (للمعلمين فقط).
@@ -1106,7 +1095,7 @@ def student_deletion_request_view(request):
             return JsonResponse({'status': 'success', 'count': len(data), 'data': data}, status=200)
 
         except Exception as exc:
-            return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء جلب طلبات الحذف', 'details': str(exc)}, status=500)
+            return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء جلب طلبات الحذف'}, status=500)
 
     # ── POST: إنشاء طلب جديد ──────────────────────────────────────────────────
     elif request.method == 'POST':
@@ -1163,12 +1152,13 @@ def student_deletion_request_view(request):
         except ValueError as ve:
             return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
         except Exception as exc:
-            return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء إرسال طلب الحذف', 'details': str(exc)}, status=500)
+            return JsonResponse({'status': 'error', 'message': 'حدث خطأ أثناء إرسال طلب الحذف'}, status=500)
 
     return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
 
 @csrf_exempt
+@tenant_auth()
 def approve_student_registration_request_view(request, request_id):
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -1285,10 +1275,11 @@ def approve_student_registration_request_view(request, request_id):
     except StudentRegistrationRequest.DoesNotExist:
         return JsonResponse({"status": "error", "message": "طلب التسجيل غير موجود"}, status=404)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشلت عملية الموافقة", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشلت عملية الموافقة"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth()
 def reject_student_registration_request_view(request, request_id):
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -1350,10 +1341,11 @@ def reject_student_registration_request_view(request, request_id):
     except StudentRegistrationRequest.DoesNotExist:
         return JsonResponse({"status": "error", "message": "طلب التسجيل غير موجود"}, status=404)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشلت عملية الرفض", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشلت عملية الرفض"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth()
 def approve_student_deletion_request_view(request, request_id):
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -1420,10 +1412,11 @@ def approve_student_deletion_request_view(request, request_id):
     except StudentDeletionRequest.DoesNotExist:
         return JsonResponse({"status": "error", "message": "طلب الحذف غير موجود"}, status=404)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشلت عملية الموافقة على طلب الحذف", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشلت عملية الموافقة على طلب الحذف"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth()
 def reject_student_deletion_request_view(request, request_id):
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -1487,10 +1480,11 @@ def reject_student_deletion_request_view(request, request_id):
     except StudentDeletionRequest.DoesNotExist:
         return JsonResponse({"status": "error", "message": "طلب الحذف غير موجود"}, status=404)
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "فشلت عملية الرفض", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "فشلت عملية الرفض"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth()
 def bulk_approve_student_requests_view(request):
     """
     API للموافقة الجماعية على طلبات الطلاب (إنشاء، تعديل، حذف)

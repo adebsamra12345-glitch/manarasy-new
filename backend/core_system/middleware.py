@@ -15,10 +15,10 @@ class TenantJWTAuthMiddleware:
         tenant_id = request.headers.get('Tenant-ID')
         tenant_subdomain = request.headers.get('X-Tenant-Subdomain')
         db_name = 'default'
+        tenant = None
         
         try:
             from core_system.tenants.models import Tenant
-            tenant = None
             if tenant_id:
                 tenant = Tenant.objects.using('default').filter(id=tenant_id, is_active=True).first()
             elif tenant_subdomain:
@@ -49,6 +49,7 @@ class TenantJWTAuthMiddleware:
             pass
         
         request.db_name = db_name
+        request.tenant = tenant
         
         # 2. JWT Authentication
         request.profile = None
@@ -60,6 +61,13 @@ class TenantJWTAuthMiddleware:
             try:
                 secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
                 payload = jwt.decode(token, secret, algorithms=['HS256'])
+                # ربط التوكن بالمسجد: توكن مسجد لا يصلح لمسجد آخر
+                token_tenant = payload.get('tenant_id')
+                if (tenant is not None and token_tenant
+                        and str(token_tenant) != str(tenant.id)
+                        and 'login' not in request.path):
+                    return JsonResponse(
+                        {'status': 'error', 'message': 'رمز التوثيق لا يخص هذا المسجد'}, status=403)
                 user_id = payload.get('user_id')
                 if user_id:
                     from tenant_modules.users.models import UserProfile

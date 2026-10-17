@@ -48,7 +48,7 @@ def payment_list_create_view(request):
         except Exception as e:
             print(f"[ERROR] Failed to query payments: {str(e)}")
             print(traceback.format_exc())
-            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الدفعات", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب الدفعات"}, status=500)
 
     elif request.method == 'POST':
         try:
@@ -91,7 +91,7 @@ def payment_list_create_view(request):
         except Exception as e:
             print(f"[ERROR] Payment recording failed: {str(e)}")
             print(traceback.format_exc())
-            return JsonResponse({"status": "error", "message": "حدث خطأ عند تسجيل الدفعة", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "حدث خطأ عند تسجيل الدفعة"}, status=500)
 
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -142,6 +142,6 @@ def sham_cash_webhook_view(request):
         except Exception as e:
             print(f"[ERROR] Sham Cash Webhook processing failed: {str(e)}")
             print(traceback.format_exc())
-            return JsonResponse({"status": "error", "message": "فشل معالجة إشعار شام كاش", "details": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": "فشل معالجة إشعار شام كاش"}, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)

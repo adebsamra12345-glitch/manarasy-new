@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Bell, CaretDown, Users, MagnifyingGlass, UserCircle, DotsThreeVertical, Clock, Check, FilePdf, CalendarBlank } from '@phosphor-icons/react';
+import { Bell, CaretDown, Users, MagnifyingGlass, UserCircle, DotsThreeVertical, Clock, Check, FilePdf, CalendarBlank, PencilSimple, BookmarkSimple, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { getHalaqat, getTeacherSessionDetail, startSession, updateSessionDetails } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
 import RecitationModal from './RecitationModal';
@@ -9,6 +9,7 @@ import MobileAttendanceSession from '../../mobile/teacher/MobileAttendanceSessio
 import PageEvaluationsList from '../../../components/PageEvaluationsList';
 import { exportSessionPdf } from '../../../utils/sessionPdfExporter';
 import AlternativeDatePickerModal from '../../../components/AlternativeDatePickerModal';
+import RequestPageChangeModal from '../../../components/RequestPageChangeModal';
 
 export const BEHAVIOR_OPTIONS = [
     { label: 'ممتاز (10)', value: 10, code: 'EXCELLENT' },
@@ -19,16 +20,11 @@ export const BEHAVIOR_OPTIONS = [
     { label: 'مغادرة الحلقة دون عذر', value: 0, code: 'LEFT_WITHOUT_EXCUSE' },
 ];
 
-const TeacherSessionDetail = () => {
-    const { isMobile } = useDeviceType();
+const DesktopTeacherSessionDetail = () => {
     const { ringId, sessionId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
     const { user } = useAuthContext();
-
-    if (isMobile) {
-        return <MobileAttendanceSession />;
-    }
     
     const isEditMode = location.search.includes('edit=true');
 
@@ -47,11 +43,17 @@ const TeacherSessionDetail = () => {
     const [sessionDate, setSessionDate] = useState('');
     const [originalSessionDate, setOriginalSessionDate] = useState('');
     const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+    const [sessionProject, setSessionProject] = useState(null);
     const [conflictDate, setConflictDate] = useState('');
     
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
+
+    // Active session & Draft states
+    const [hasDraft, setHasDraft] = useState(false);
+    const [requestingStudent, setRequestingStudent] = useState(null);
+    const [sessionIsActive, setSessionIsActive] = useState(true);
 
     const menuRef = useRef(null);
 
@@ -87,12 +89,35 @@ const TeacherSessionDetail = () => {
             try {
                 const response = await getTeacherSessionDetail(sessionId);
                 if (response.status === 'success') {
-                    setStudents(response.attendance || []);
+                    const serverStudents = response.attendance || [];
                     setEvaluationTemplate(response.evaluation_template || null);
+                    setSessionProject(response.project || null);
+                    if (response.is_active !== undefined) {
+                        setSessionIsActive(response.is_active);
+                    }
                     if (response.session_date) {
                         const dStr = response.session_date.slice(0, 10);
                         setSessionDate(dStr);
                         setOriginalSessionDate(dStr);
+                    }
+
+                    // التحقق من وجود مسودة محلية محفوظة مسبقاً
+                    const draftKey = `manara_session_draft_${sessionId}`;
+                    const savedDraft = sessionStorage.getItem(draftKey);
+                    if (savedDraft) {
+                        try {
+                            const parsed = JSON.parse(savedDraft);
+                            if (Array.isArray(parsed) && parsed.length > 0) {
+                                setStudents(parsed);
+                                setHasDraft(true);
+                            } else {
+                                setStudents(serverStudents);
+                            }
+                        } catch (e) {
+                            setStudents(serverStudents);
+                        }
+                    } else {
+                        setStudents(serverStudents);
                     }
                 } else {
                     setError('فشل في جلب تفاصيل الجلسة');
@@ -107,6 +132,29 @@ const TeacherSessionDetail = () => {
         
         loadSessionData();
     }, [sessionId]);
+
+    // حفظ تلقائي للمسودة في sessionStorage
+    useEffect(() => {
+        if (!sessionId || loading || students.length === 0 || !isEditMode) return;
+        const draftKey = `manara_session_draft_${sessionId}`;
+        sessionStorage.setItem(draftKey, JSON.stringify(students));
+    }, [students, sessionId, loading, isEditMode]);
+
+    const handleDiscardDraft = async () => {
+        if (!window.confirm('هل أنت متأكد من إلغاء التعديلات الجارية واستعادة البيانات الأصلية من الخادم؟')) return;
+        const draftKey = `manara_session_draft_${sessionId}`;
+        sessionStorage.removeItem(draftKey);
+        setHasDraft(false);
+        setLoading(true);
+        try {
+            const res = await getTeacherSessionDetail(sessionId);
+            if (res.status === 'success') {
+                setStudents(res.attendance || []);
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleRingChange = (e) => {
         const newRingId = e.target.value;
@@ -183,6 +231,7 @@ const TeacherSessionDetail = () => {
                 change_reason: 'تعديل تاريخ الجلسة من شاشة التقييمات',
                 students: students.map(st => ({
                     attendance_id: st.attendance_id,
+                    student_id: st.student_id,
                     status: st.status || 'PRESENT',
                     is_late: !!st.is_late,
                     behavior_score: st.behavior_score !== undefined ? st.behavior_score : 10,
@@ -192,10 +241,13 @@ const TeacherSessionDetail = () => {
             };
             const response = await updateSessionDetails(sessionId, payload);
             if (response.status === 'success') {
+                const draftKey = `manara_session_draft_${sessionId}`;
+                sessionStorage.removeItem(draftKey);
+                setHasDraft(false);
                 setOriginalSessionDate(dateToSave);
                 alert('تم حفظ تفاصيل الجلسة وتحديث التاريخ بنجاح!');
                 const basePath = location.pathname.startsWith('/admin') ? '/admin' : '/teacher';
-                navigate(`${basePath}/rings/${selectedRingId}/sessions/${sessionId}`);
+                navigate(`${basePath}/rings/${selectedRingId}/sessions/${sessionId}?edit=true`, { replace: true });
             } else {
                 alert(response.message || 'حدث خطأ أثناء الحفظ');
             }
@@ -225,16 +277,28 @@ const TeacherSessionDetail = () => {
             let updatedEvals = st.evaluations || [];
             if (newEvaluation) {
                 if (isUpdate) {
-                    // Replace the existing evaluation for this page
-                    updatedEvals = updatedEvals.map(ev =>
-                        ev.page_number === newEvaluation.page_number ? newEvaluation : ev
-                    );
+                    updatedEvals = updatedEvals.map(ev => {
+                        if (newEvaluation.lesson_title && ev.lesson_title === newEvaluation.lesson_title) {
+                            return newEvaluation;
+                        }
+                        return ev.page_number === newEvaluation.page_number ? newEvaluation : ev;
+                    });
                 } else {
-                    // Append the new evaluation
                     updatedEvals = [...updatedEvals, newEvaluation];
                 }
             }
-            return { ...st, reached_page: newReachedPage, evaluations: updatedEvals };
+            const updatedEnrollment = st.enrollment ? {
+                ...st.enrollment,
+                part_id: newEvaluation?.part_id || st.enrollment.part_id,
+                part_title: newEvaluation?.part_title || newEvaluation?.lesson_title || st.enrollment.part_title,
+                stage_title: newEvaluation?.stage_title || st.enrollment.stage_title
+            } : (newEvaluation?.part_title ? {
+                part_id: newEvaluation.part_id,
+                part_title: newEvaluation.part_title,
+                stage_title: newEvaluation.stage_title
+            } : null);
+
+            return { ...st, reached_page: newReachedPage, evaluations: updatedEvals, enrollment: updatedEnrollment };
         }));
     };
 
@@ -303,7 +367,26 @@ const TeacherSessionDetail = () => {
 
             {/* Page Title & Controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h2 style={{ fontSize: '2.2rem', color: '#1a3b1c', fontWeight: 'bold' }}>طلاب الحلقة {isEditMode ? '' : '(للقراءة فقط)'}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                    <h2 style={{ fontSize: '2.2rem', color: '#1a3b1c', fontWeight: 'bold', margin: 0 }}>
+                        طلاب الحلقة {isEditMode ? '' : '(للقراءة فقط)'}
+                    </h2>
+                    <span style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 'bold',
+                        color: sessionIsActive ? '#2e7d32' : '#757575',
+                        backgroundColor: sessionIsActive ? '#e8f5e9' : '#f5f5f5',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '12px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        border: `1px solid ${sessionIsActive ? '#c8e6c9' : '#e0e0e0'}`
+                    }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: sessionIsActive ? '#4caf50' : '#bdbdbd' }}></span>
+                        {sessionIsActive ? 'جلسة جارية' : 'جلسة مكتملة'}
+                    </span>
+                </div>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', width: '60%' }}>
                     <div style={{ position: 'relative', flex: 1 }}>
                         <input 
@@ -357,6 +440,47 @@ const TeacherSessionDetail = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Unsaved Draft Notification Banner */}
+            {hasDraft && (
+                <div style={{
+                    backgroundColor: '#fff8e1',
+                    border: '1px solid #ffe082',
+                    borderRadius: '10px',
+                    padding: '0.75rem 1.25rem',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '0.88rem',
+                    color: '#e65100'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Clock size={18} weight="bold" />
+                        <span><strong>جلسة جارية:</strong> توجد تعديلات حضور وسلوك مسجلة مؤقتاً لم يتم حفظها بعد. اضغط "حفظ التقييمات والتاريخ" لتثبيتها في النظام.</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleDiscardDraft}
+                        style={{
+                            backgroundColor: '#fff',
+                            border: '1px solid #ffcc80',
+                            color: '#c62828',
+                            borderRadius: '6px',
+                            padding: '0.3rem 0.75rem',
+                            fontSize: '0.82rem',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem'
+                        }}
+                    >
+                        <ArrowCounterClockwise size={14} />
+                        إلغاء التعديلات
+                    </button>
+                </div>
+            )}
 
             {/* Session Info & Date Management Bar */}
             <div style={{
@@ -517,12 +641,43 @@ const TeacherSessionDetail = () => {
                                 textAlign: 'center',
                                 position: 'relative'
                             }}>
-                                {/* Student Name & Late Indicator */}
+                                {/* Student Name & Late Indicator & Reached Page */}
                                 <div style={{ flex: 1.8, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', textAlign: 'right' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 'bold', color: '#133315' }}>
                                         <UserCircle size={24} color="#64b5f6" weight="fill" />
                                         <span>{student.student_name}</span>
                                     </div>
+                                    {sessionProject?.evaluation_unit === 'LESSONS' || sessionProject?.evaluation_unit === 'TOPICS' ? (
+                                        <span style={{ fontSize: '0.78rem', color: '#1565c0', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.2rem' }}>
+                                            <BookmarkSimple size={13} weight="bold" />
+                                            {sessionProject?.evaluation_unit === 'LESSONS' ? 'الدرس' : 'المحور'} الحالي: {student.enrollment?.part_title || 'لم يُحدد'}
+                                            {student.enrollment?.stage_title && (
+                                                <span style={{ fontSize: '0.72rem', color: '#666', fontWeight: 'normal' }}>
+                                                    ({student.enrollment.stage_title})
+                                                </span>
+                                            )}
+                                        </span>
+                                    ) : (
+                                        <span style={{ fontSize: '0.78rem', color: '#e65100', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.2rem' }}>
+                                            صفحة الوصول: {student.reached_page || 1}
+                                            <button
+                                                type="button"
+                                                title="طلب تعديل صفحة الوصول"
+                                                onClick={() => setRequestingStudent(student)}
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    padding: '0 0.15rem',
+                                                    cursor: 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    color: '#558b2f'
+                                                }}
+                                            >
+                                                <PencilSimple size={13} weight="bold" />
+                                            </button>
+                                        </span>
+                                    )}
                                     {student.is_late && (
                                         <span style={{ 
                                             marginTop: '0.25rem',
@@ -784,6 +939,30 @@ const TeacherSessionDetail = () => {
                                                 </span>
                                                 {student.is_late && <Check size={16} color="#e65100" weight="bold" />}
                                             </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setRequestingStudent(student);
+                                                    setActiveMenuId(null);
+                                                }}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.6rem 0.8rem',
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    borderTop: '1px solid #f0f0f0',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.4rem',
+                                                    fontSize: '0.82rem',
+                                                    color: '#133315',
+                                                    fontWeight: 'bold'
+                                                }}
+                                            >
+                                                <BookmarkSimple size={15} color="#558b2f" weight="fill" />
+                                                <span>طلب تعديل صفحة الوصول</span>
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -821,10 +1000,25 @@ const TeacherSessionDetail = () => {
             <RecitationModal 
                 isOpen={!!evaluatingStudent}
                 onClose={() => setEvaluatingStudent(null)}
-                student={evaluatingStudent}
+                student={evaluatingStudent ? { ...evaluatingStudent, project: evaluatingStudent.project || sessionProject } : null}
                 evaluationTemplate={evaluationTemplate}
                 onEvaluationSuccess={handleEvaluationSuccess}
                 canEdit={isEditMode}
+            />
+
+            {/* Request Page Change Modal */}
+            <RequestPageChangeModal
+                isOpen={!!requestingStudent}
+                onClose={() => setRequestingStudent(null)}
+                student={requestingStudent}
+                ringId={selectedRingId}
+                onSuccess={(newPage) => {
+                    if (requestingStudent) {
+                        setStudents(prev => prev.map(st =>
+                            st.student_id === requestingStudent.student_id ? { ...st, reached_page: newPage } : st
+                        ));
+                    }
+                }}
             />
 
             {/* Alternative Date Picker Modal for Conflict Resolution */}
@@ -840,6 +1034,16 @@ const TeacherSessionDetail = () => {
             />
         </div>
     );
+};
+
+const TeacherSessionDetail = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAttendanceSession />;
+    }
+
+    return <DesktopTeacherSessionDetail />;
 };
 
 export default TeacherSessionDetail;

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
-from django.test import RequestFactory
+from tenant_modules.attendance.test_utils import StaffRequestFactory
 from django.conf import settings
 from django.utils import timezone
 from core_system.tenants.models import Tenant
@@ -38,7 +38,7 @@ def run_backend_tests():
     halaqa = Halaqa.objects.using(db_name).first()
     assert halaqa is not None, "A halaqa is required for testing"
 
-    factory = RequestFactory()
+    factory = StaffRequestFactory(tenant)
     today = timezone.now().date()
     past_date = today - datetime.timedelta(days=7)
     future_date = today + datetime.timedelta(days=7)

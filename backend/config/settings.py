@@ -12,21 +12,55 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 import os
 from pathlib import Path
+from django.core.management.utils import get_random_secret_key
+import dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
+# Load environment variables from .env file
+dotenv.load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-@_w-86x@gtu8giul7e((1smsgg4^o2=pk(r5tjhfjsr=3y7$**')
-DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 't')
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()]
+# الافتراضات آمنة: الإنتاج هو الوضع الأساسي، والتطوير يتطلب DEBUG=True صراحةً في .env
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
 
-CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True').lower() in ('true', '1', 't')
-if not CORS_ALLOW_ALL_ORIGINS:
-    CORS_ALLOWED_ORIGINS = [o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if o.strip()]
-    CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://([a-zA-Z0-9-]+\.)?manarasy\.io$",]
+# Generate SECRET_KEY securely. In production it must be set via environment.
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-dev-only-key'
+    else:
+        SECRET_KEY = get_random_secret_key()
+
+# ALLOWED_HOSTS configuration
+ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS')
+if ALLOWED_HOSTS_ENV:
+    ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_ENV.split(',') if h.strip()]
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+
+for default_host in ['localhost', '127.0.0.1', '.localhost', '.manarasy.com', '.manarasy.io']:
+    if default_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(default_host)
+
+# CORS configuration
+CORS_ALLOW_ALL_ORIGINS = True if DEBUG else os.getenv('CORS_ALLOW_ALL_ORIGINS', 'False').lower() in ('true', '1', 't')
+CORS_ORIGIN_ALLOW_ALL = CORS_ALLOW_ALL_ORIGINS
+CORS_ALLOWED_ORIGINS = [o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if o.strip()]
+if not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    ]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://([a-zA-Z0-9-]+\.)?manarasy\.io$",
+    r"^https://([a-zA-Z0-9-]+\.)?manarasy\.com$",
+    r"^http://([a-zA-Z0-9-]+\.)?localhost(:[0-9]+)?$",
+    r"^http://127\.0\.0\.1(:[0-9]+)?$",
+]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     'accept',
@@ -116,7 +150,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('POSTGRES_DB', os.getenv('DB_NAME', 'manara_db')),
         'USER': os.getenv('POSTGRES_USER', os.getenv('DB_USER', 'manara_user')),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', os.getenv('DB_PASSWORD', 'M@nara_2026_Str0ng!')),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', os.getenv('DB_PASSWORD', '')),
         'HOST': os.getenv('POSTGRES_HOST', os.getenv('DB_HOST', 'localhost')),
         'PORT': int(os.getenv('POSTGRES_PORT', os.getenv('DB_PORT', '5432'))),
         'CONN_MAX_AGE': int(os.getenv('CONN_MAX_AGE', '60')),
@@ -225,12 +259,15 @@ RECEIPT_MAX_FILES_PER_REQUEST = 3
 FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 
-# JWT الخاص بأدمن المنصة: مفتاح منفصل + audience/issuer مختلفان عن توكنات المساجد،
-# لذلك لا يمكن استخدام توكن مسجد على واجهات المنصة ولا العكس.
+# JWT الخاص بأدمن المنصة والمساجد
 PLATFORM_JWT_SECRET = os.getenv('PLATFORM_JWT_SECRET', '')   # يُشتق من SECRET_KEY إن تُرك فارغاً
 PLATFORM_JWT_LIFETIME_MINUTES = int(os.getenv('PLATFORM_JWT_LIFETIME_MINUTES', '120'))
 PLATFORM_LOGIN_MAX_FAILURES = 5
 PLATFORM_LOGIN_LOCK_MINUTES = 15
+
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
+JWT_ACCESS_TOKEN_LIFETIME_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', '60'))
+JWT_REFRESH_TOKEN_LIFETIME_DAYS = int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME_DAYS', '7'))
 
 # إنشاء قاعدة المسجد: متزامن افتراضياً. اضبط PROVISIONING_ASYNC=true بعد تشغيل Celery + Redis
 PROVISIONING_ASYNC = os.getenv('PROVISIONING_ASYNC', 'False').lower() in ('true', '1', 't')
@@ -250,3 +287,16 @@ REST_FRAMEWORK = {
         'platform_api': '240/min',
     },
 }
+
+# إعدادات الأمان الصارمة (Security Hardening - 10/10)
+# في وضع التطوير (DEBUG=True) يتم إيقاف التحويل القسري لـ HTTPS لتجنب مشاكل 301 مع localhost
+SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False' if DEBUG else 'True').lower() in ('true', '1', 't')
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

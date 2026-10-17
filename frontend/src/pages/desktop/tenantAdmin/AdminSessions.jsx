@@ -35,14 +35,9 @@ const WEEKS_LIST = [
     { id: 4, name: 'الرابع' },
 ];
 
-const AdminSessions = () => {
+const DesktopAdminSessions = () => {
     const navigate = useNavigate();
     const { user } = useAuthContext();
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileAdminSessions />;
-    }
 
     // User display name & date header matching platform aesthetic
     const userStr = localStorage.getItem('user');
@@ -1024,6 +1019,16 @@ const AdminSessions = () => {
 
         </div>
     );
+};
+
+const AdminSessions = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAdminSessions />;
+    }
+
+    return <DesktopAdminSessions />;
 };
 
 export default AdminSessions;

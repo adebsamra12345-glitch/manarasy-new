@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     MagnifyingGlass, Trash, X, CheckCircle, WarningCircle,
     ClockCounterClockwise, PhoneCall, Star, CaretDown, ArrowLeft,
-    PencilSimple, TrendUp
+    PencilSimple, TrendUp, UserPlus
 } from '@phosphor-icons/react';
 import { getHalaqat, getStudentsByRing } from '../../../services/api/tenantService';
 import { submitStudentDeletionRequest, getStudentDeletionRequests } from '../../../services/api/tenantService';
@@ -154,12 +154,29 @@ const MobileTeacherStudents = () => {
             <div style={{ background: '#fff', padding: '1rem', borderBottom: '1px solid #eee', position: 'sticky', top: 0, zIndex: 100 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
                     <h1 style={{ margin: 0, fontSize: '1.4rem', color: '#1a3b1c', fontWeight: '700' }}>الطلاب</h1>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <span style={{ background: '#f4a261', color: '#fff', padding: '0.2rem 0.7rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: '700' }}>{students.length}</span>
-                        <button id="btn-mobile-deletion-requests" onClick={() => { setShowRequestsView(true); fetchDeletionRequests(); }} style={{ background: '#ffebee', border: 'none', borderRadius: '10px', padding: '0.5rem 0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                            <ClockCounterClockwise size={18} color="#c62828" />
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                        <button
+                            id="btn-mobile-request-add-student"
+                            onClick={() => { setStudentToEdit(null); setIsWizardOpen(true); }}
+                            style={{
+                                background: '#e8f5e9',
+                                border: '1px solid #c8e6c9',
+                                borderRadius: '10px',
+                                padding: '0.45rem 0.65rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.3rem'
+                            }}
+                        >
+                            <UserPlus size={16} color="#2e7d32" weight="bold" />
+                            <span style={{ fontSize: '0.78rem', color: '#2e7d32', fontWeight: '700' }}>إضافة طالب</span>
+                        </button>
+                        <button id="btn-mobile-deletion-requests" onClick={() => { setShowRequestsView(true); fetchDeletionRequests(); }} style={{ background: '#ffebee', border: 'none', borderRadius: '10px', padding: '0.45rem 0.65rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <ClockCounterClockwise size={16} color="#c62828" />
                             <span style={{ fontSize: '0.78rem', color: '#c62828', fontWeight: '600' }}>الطلبات</span>
                         </button>
+                        <span style={{ background: '#f4a261', color: '#fff', padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: '700' }}>{students.length}</span>
                     </div>
                 </div>
                 <div style={{ position: 'relative', marginBottom: '0.7rem' }}>
@@ -314,7 +331,12 @@ const MobileTeacherStudents = () => {
                 onClose={() => { setIsWizardOpen(false); setStudentToEdit(null); }}
                 onComplete={() => {
                     fetchStudents();
-                    setToast({ message: 'تم إرسال طلب تعديل بيانات الطالب بنجاح بانتظار موافقة الإدارة.', type: 'success' });
+                    setToast({
+                        message: studentToEdit
+                            ? 'تم إرسال طلب تعديل بيانات الطالب بنجاح بانتظار موافقة الإدارة.'
+                            : 'تم إرسال طلب إضافة الطالب بنجاح بانتظار موافقة الإدارة.',
+                        type: 'success'
+                    });
                 }}
                 studentToEdit={studentToEdit}
             />

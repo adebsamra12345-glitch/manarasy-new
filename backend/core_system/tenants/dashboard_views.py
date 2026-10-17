@@ -52,9 +52,6 @@ def resolve_tenant_db(request):
             tenant = Tenant.objects.filter(subdomain=subdomain, is_active=True).first()
 
     if not tenant:
-        tenant = Tenant.objects.filter(is_active=True).first()
-
-    if not tenant:
         return 'default', None
 
     db_name = tenant.db_name
@@ -64,7 +61,7 @@ def resolve_tenant_db(request):
         new_db_config.update({
             'NAME': db_name,
             'USER': tenant.db_user or master_db.get('USER', 'manara_user'),
-            'PASSWORD': tenant.db_password_hash or master_db.get('PASSWORD', 'M@nara_2026_Str0ng!'),
+            'PASSWORD': tenant.db_password_hash or master_db.get('PASSWORD', ''),
             'HOST': tenant.db_host or 'localhost',
             'PORT': tenant.db_port or 5432,
         })

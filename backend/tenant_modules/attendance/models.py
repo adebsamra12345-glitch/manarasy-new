@@ -60,7 +60,7 @@ class AttendanceLog(models.Model):
     student_id = models.UUIDField()
     halaqa_id = models.UUIDField()
     teacher_id = models.UUIDField(null=True, blank=True)
-    session_date = models.DateField(auto_now_add=True)
+    session_date = models.DateField(default=timezone.now)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PRESENT')
     is_late = models.BooleanField(default=False)
     behavior_score = models.IntegerField(default=10, null=True, blank=True)

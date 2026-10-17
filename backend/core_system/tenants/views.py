@@ -47,7 +47,7 @@ def health_check_view(request):
         return JsonResponse({
             "status": "error",
             "message": "حدث خطأ أثناء فحص حالة السيرفر",
-            "details": str(e)
+            
         }, status=500)
 
 @csrf_exempt
@@ -94,7 +94,7 @@ def tenant_list_create_view(request):
             return JsonResponse({
                 "status": "error",
                 "message": "حدث خطأ أثناء استرجاع قائمة المستأجرين",
-                "details": str(e)
+                
             }, status=500)
 
     elif request.method == 'POST':
@@ -123,7 +123,7 @@ def tenant_list_create_view(request):
             
             master_db = settings.DATABASES['default']
             default_db_user = data.get('db_user', master_db.get('USER', 'manara_user'))
-            default_db_password = data.get('db_password_hash', master_db.get('PASSWORD', 'M@nara_2026_Str0ng!'))
+            default_db_password = data.get('db_password_hash', master_db.get('PASSWORD', ''))
 
             print("  [STEP 3] Creating new Tenant record in Master DB...")
             tenant = Tenant.objects.create(
@@ -170,7 +170,7 @@ def tenant_list_create_view(request):
             return JsonResponse({
                 "status": "error",
                 "message": "النطاق الفرعي (subdomain) أو قاعدة البيانات مستخدم بالفعل",
-                "details": str(e)
+                
             }, status=400)
 
         except ValueError as e:
@@ -183,7 +183,7 @@ def tenant_list_create_view(request):
             return JsonResponse({
                 "status": "error",
                 "message": "حدث خطأ غير متوقع عند حفظ المستأجر",
-                "details": str(e)
+                
             }, status=500)
 
     else:
@@ -237,7 +237,7 @@ def tenant_detail_view(request, pk):
         return JsonResponse({
             "status": "error",
             "message": "حدث خطأ أثناء جلب تفاصيل المستأجر",
-            "details": str(e)
+            
         }, status=500)
 
 
@@ -281,6 +281,18 @@ def tenant_login_view(request):
                 "message": "اسم النطاق الفرعي للمسجد (subdomain)، اسم المستخدم، وكلمة المرور مطلوبان"
             }, status=400)
 
+        # تحديد محاولات الدخول الفاشلة (لكل IP + مسجد + مستخدم)
+        from django.core.cache import cache
+        from rest_framework.throttling import BaseThrottle
+        fail_key = 'tenant_login_fail:%s:%s:%s' % (BaseThrottle().get_ident(request), subdomain, username)
+        max_fail = getattr(settings, 'TENANT_LOGIN_MAX_FAILURES', 5)
+        lock_seconds = getattr(settings, 'TENANT_LOGIN_LOCK_MINUTES', 15) * 60
+        if cache.get(fail_key, 0) >= max_fail:
+            return JsonResponse({
+                "status": "error",
+                "message": "تم تعليق محاولات الدخول مؤقتاً بسبب كثرة المحاولات الخاطئة. حاول لاحقاً"
+            }, status=429)
+
         # 1. التحقق من وجود المسجد وأنه نشط
         try:
             tenant = Tenant.objects.get(subdomain=subdomain, is_active=True)
@@ -298,7 +310,7 @@ def tenant_login_view(request):
             new_db_config.update({
                 'NAME': db_name,
                 'USER': tenant.db_user or master_db.get('USER', 'manara_user'),
-                'PASSWORD': tenant.db_password_hash or master_db.get('PASSWORD', 'M@nara_2026_Str0ng!'),
+                'PASSWORD': tenant.db_password_hash or master_db.get('PASSWORD', ''),
                 'HOST': tenant.db_host or 'localhost',
                 'PORT': tenant.db_port or 5432,
             })
@@ -337,10 +349,17 @@ def tenant_login_view(request):
                 role = "TENANT_ADMIN"
 
         if not is_authenticated:
+            cache.add(fail_key, 0, lock_seconds)
+            try:
+                cache.incr(fail_key)
+            except ValueError:
+                cache.set(fail_key, 1, lock_seconds)
             return JsonResponse({
                 "status": "error",
                 "message": "اسم المستخدم أو كلمة المرور غير صحيحة"
             }, status=401)
+
+        cache.delete(fail_key)
 
         profile_center_id = None
         profile_center_name = None
@@ -407,5 +426,5 @@ def tenant_login_view(request):
         return JsonResponse({
             "status": "error",
             "message": "حدث خطأ غير متوقع أثناء تسجيل الدخول",
-            "details": str(e)
+            
         }, status=500)

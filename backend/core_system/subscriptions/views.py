@@ -51,8 +51,7 @@ def plan_list_view(request):
             print(traceback.format_exc())
             return JsonResponse({
                 "status": "error",
-                "message": "حدث خطأ أثناء استرجاع خطط الاشتراك",
-                "details": str(e)
+                "message": "حدث خطأ أثناء استرجاع خطط الاشتراك"
             }, status=500)
     else:
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -98,8 +97,7 @@ def subscription_list_create_view(request):
             print(traceback.format_exc())
             return JsonResponse({
                 "status": "error",
-                "message": "خطأ أثناء استرجاع قائمة الاشتراكات",
-                "details": str(e)
+                "message": "خطأ أثناء استرجاع قائمة الاشتراكات"
             }, status=500)
 
     elif request.method == 'POST':
@@ -153,8 +151,7 @@ def subscription_list_create_view(request):
             print(f"[ERROR] Referenced Tenant or Plan not found: {str(e)}")
             return JsonResponse({
                 "status": "error",
-                "message": "المستأجر أو خطة الاشتراك غير موجودة في النظام",
-                "details": str(e)
+                "message": "المستأجر أو خطة الاشتراك غير موجودة في النظام"
             }, status=404)
 
         except ValueError as e:
@@ -166,8 +163,7 @@ def subscription_list_create_view(request):
             print(traceback.format_exc())
             return JsonResponse({
                 "status": "error",
-                "message": "حدث خطأ عند إضافة الاشتراك",
-                "details": str(e)
+                "message": "حدث خطأ عند إضافة الاشتراك"
             }, status=500)
 
     else:

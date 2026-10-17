@@ -6,8 +6,7 @@ import { useAuthContext } from '../../../context/AuthContext';
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileHalqaList from '../../mobile/teacher/MobileHalqaList';
 
-const TeacherRings = () => {
-    const { isMobile } = useDeviceType();
+const DesktopTeacherRings = () => {
     const navigate = useNavigate();
     const today = new Date();
     const dateStr = today.toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -16,10 +15,6 @@ const TeacherRings = () => {
     const [rings, setRings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-
-    if (isMobile) {
-        return <MobileHalqaList hideStats={true} />;
-    }
 
     useEffect(() => {
         const fetchRings = async () => {
@@ -135,6 +130,16 @@ const TeacherRings = () => {
             )}
         </div>
     );
+};
+
+const TeacherRings = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileHalqaList hideStats={true} />;
+    }
+
+    return <DesktopTeacherRings />;
 };
 
 export default TeacherRings;

@@ -2,6 +2,7 @@ import traceback
 from datetime import date, timedelta, datetime
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from core_system.auth import tenant_auth, get_tenant_db, STAFF_ROLES
 from django.db.models import Count, Sum, Avg, Q, F, FloatField, IntegerField, ExpressionWrapper, Value, CharField
 from django.db.models.functions import Coalesce, NullIf
 from django.utils import timezone
@@ -23,31 +24,6 @@ from .analytical_engines import (
     analyze_student_trend,
     compute_overall_assessment
 )
-
-
-def get_tenant_db(request):
-    tenant_id = request.headers.get('Tenant-ID')
-    if not tenant_id:
-        return 'default'
-
-    try:
-        tenant = Tenant.objects.using('default').get(id=tenant_id)
-        db_name = tenant.db_name
-
-        if db_name not in settings.DATABASES:
-            new_db_config = settings.DATABASES['default'].copy()
-            new_db_config.update({
-                'NAME': tenant.db_name,
-                'USER': tenant.db_user or settings.DATABASES['default'].get('USER'),
-                'PASSWORD': tenant.db_password_hash or settings.DATABASES['default'].get('PASSWORD'),
-                'HOST': tenant.db_host or 'localhost',
-                'PORT': tenant.db_port or 5432,
-            })
-            settings.DATABASES[db_name] = new_db_config
-
-        return db_name
-    except Exception:
-        return 'default'
 
 
 def compute_rating(attendance_rate, pages_recited):
@@ -142,6 +118,7 @@ def paginate_items(items_list, request):
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def available_months_view(request):
     """
     Endpoint returning available mosque YYYY-MM months list.
@@ -158,6 +135,7 @@ def available_months_view(request):
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def analytics_summary_view(request):
     if request.method != 'GET':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -231,10 +209,11 @@ def analytics_summary_view(request):
         return JsonResponse({"status": "success", "message": "تم حساب المؤشرات بنجاح", "data": data}, status=200)
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حساب مؤشرات الأداء", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء حساب مؤشرات الأداء"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def reports_data_view(request):
     if request.method != 'GET':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
@@ -709,10 +688,11 @@ def reports_data_view(request):
     except Exception as e:
         print(f"[ERROR] Reports API failed: {str(e)}")
         print(traceback.format_exc())
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب بيانات التقارير", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب بيانات التقارير"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def student_activity_view(request):
     """
     Dedicated Endpoint for Student Activity Page.
@@ -831,10 +811,11 @@ def student_activity_view(request):
     except Exception as e:
         print(f"[ERROR] Student Activity API failed: {str(e)}")
         print(traceback.format_exc())
-        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب نشاط الطالب", "details": str(e)}, status=500)
+        return JsonResponse({"status": "error", "message": "حدث خطأ أثناء جلب نشاط الطالب"}, status=500)
 
 
 @csrf_exempt
+@tenant_auth(STAFF_ROLES)
 def certificate_generate_view(request):
     if request.method != 'GET':
         return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)

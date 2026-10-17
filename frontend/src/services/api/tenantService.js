@@ -485,7 +485,9 @@ export const saveMosqueBulkSchedule = async (data) => {
 // ===== إعدادات المسجد =====
 /** بيانات عامة (اسم + شعار) لبطاقة تسجيل الدخول، بدون مصادقة */
 export const getTenantBranding = async (subdomain) => {
-    const response = await apiClient.get('/api/tenants/branding/', { params: { subdomain } });
+    const response = await apiClient.get('/api/tenants/branding/', { 
+        params: { subdomain, _t: Date.now() } 
+    });
     return response.data;
 };
 

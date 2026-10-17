@@ -23,13 +23,7 @@ import TestsModule from './tests/TestsModule';
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileCentersAndProjects from '../../mobile/tenantAdmin/MobileCentersAndProjects';
 
-const CentersAndProjects = () => {
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileCentersAndProjects />;
-    }
-
+const DesktopCentersAndProjects = () => {
     // Current User formatting matching reference: "السلام عليكم، أ. محمد العمري"
     const userStr = localStorage.getItem('user');
     let userObj = null;
@@ -70,6 +64,8 @@ const CentersAndProjects = () => {
     const [projectTitle, setProjectTitle] = useState('');
     const [projectDesc, setProjectDesc] = useState('');
     const [projectType, setProjectType] = useState('QURAN');
+    const [evaluationUnit, setEvaluationUnit] = useState('PAGES'); // 'PAGES' | 'LESSONS' | 'TOPICS'
+    const [recitationDirection, setRecitationDirection] = useState('FORWARD');
     const [isGlobal, setIsGlobal] = useState(true);
     const [requireExam, setRequireExam] = useState(false);
     const [selectedEvalId, setSelectedEvalId] = useState('');
@@ -150,6 +146,8 @@ const CentersAndProjects = () => {
         setProjectTitle('');
         setProjectDesc('');
         setProjectType('QURAN');
+        setEvaluationUnit('PAGES');
+        setRecitationDirection('FORWARD');
         setIsGlobal(true);
         setSelectedCenters(availableCenters.map(c => c.id));
         setRequireExam(false);
@@ -164,6 +162,8 @@ const CentersAndProjects = () => {
         setProjectTitle(proj.title || '');
         setProjectDesc(proj.description || '');
         setProjectType(proj.project_type || 'QURAN');
+        setEvaluationUnit(proj.evaluation_unit || 'PAGES');
+        setRecitationDirection(proj.recitation_direction || 'FORWARD');
         const isProjGlobal = proj.is_global ?? false;
         setIsGlobal(isProjGlobal);
         setRequireExam(proj.require_exam_for_all_stages || false);
@@ -223,6 +223,8 @@ const CentersAndProjects = () => {
             title: projectTitle.trim(),
             description: projectDesc,
             project_type: projectType,
+            evaluation_unit: projectType === 'CUSTOM' ? evaluationUnit : 'PAGES',
+            recitation_direction: recitationDirection,
             is_global: isGlobal,
             require_exam_for_all_stages: requireExam,
             evaluation_template_id: selectedEvalId,
@@ -376,33 +378,55 @@ const CentersAndProjects = () => {
         if (project.stages && project.stages.length > 0) {
             setSelectedStageForPart(project.stages[0].id);
         }
+        const isLessons = project.project_type === 'CUSTOM' && project.evaluation_unit === 'LESSONS';
+        const isTopics = project.project_type === 'CUSTOM' && project.evaluation_unit === 'TOPICS';
+        if (isLessons) {
+            setNewPartTitle('الدرس 1');
+        } else if (isTopics) {
+            setNewPartTitle('المحور 1');
+        } else {
+            setNewPartTitle('الجزء 1');
+            setNewPartJuz(1);
+        }
     };
 
-    // Add Part
+    // Add Part / Lesson / Topic
     const handleAddPart = async () => {
+        const isLessons = selectedProjectForParts?.project_type === 'CUSTOM' && selectedProjectForParts?.evaluation_unit === 'LESSONS';
+        const isTopics = selectedProjectForParts?.project_type === 'CUSTOM' && selectedProjectForParts?.evaluation_unit === 'TOPICS';
+        const unitName = isLessons ? 'الدرس' : (isTopics ? 'المحور' : 'الجزء');
+
         if (!newPartTitle.trim() || !selectedStageForPart) {
-            showToast('يرجى تحديد المرحلة وكتابة اسم الجزء');
+            showToast(`يرجى تحديد المرحلة وكتابة اسم ${unitName}`);
             return;
         }
         setAddingPart(true);
         try {
+            let partType = 'DEFAULT_QURAN';
+            if (isLessons) partType = 'LESSON';
+            else if (isTopics) partType = 'TOPIC';
+
             const payload = {
                 title: newPartTitle.trim(),
-                part_type: 'DEFAULT_QURAN',
-                juz_number: newPartJuz,
-                start_page: (newPartJuz - 1) * 20 + 1,
-                end_page: newPartJuz * 20
+                part_type: partType,
+                juz_number: partType === 'DEFAULT_QURAN' ? newPartJuz : null,
+                start_page: partType === 'DEFAULT_QURAN' ? (newPartJuz - 1) * 20 + 1 : 1,
+                end_page: partType === 'DEFAULT_QURAN' ? newPartJuz * 20 : 1
             };
             const res = await createStagePart(selectedStageForPart, payload);
             if (res.status === 'success') {
-                showToast('تمت إضافة الجزء بنجاح');
-                setNewPartTitle(`الجزء ${newPartJuz + 1 <= 30 ? newPartJuz + 1 : 1}`);
-                setNewPartJuz(prev => (prev < 30 ? prev + 1 : 1));
+                showToast(`تمت إضافة ${unitName} بنجاح`);
+                if (partType === 'DEFAULT_QURAN') {
+                    setNewPartTitle(`الجزء ${newPartJuz + 1 <= 30 ? newPartJuz + 1 : 1}`);
+                    setNewPartJuz(prev => (prev < 30 ? prev + 1 : 1));
+                } else {
+                    setNewPartTitle('');
+                }
                 fetchInitialData();
             }
         } catch (err) {
             console.error(err);
-            showToast('فشلت إضافة الجزء');
+            showToast(`فشلت إضافة ${unitName}`);
         } finally {
             setAddingPart(false);
         }
@@ -410,16 +434,20 @@ const CentersAndProjects = () => {
 
     // Delete Part
     const handleDeletePart = async (partId) => {
-        if (!window.confirm('هل تريد حذف هذا الجزء؟')) return;
+        const isLessons = selectedProjectForParts?.project_type === 'CUSTOM' && selectedProjectForParts?.evaluation_unit === 'LESSONS';
+        const isTopics = selectedProjectForParts?.project_type === 'CUSTOM' && selectedProjectForParts?.evaluation_unit === 'TOPICS';
+        const unitName = isLessons ? 'الدرس' : (isTopics ? 'المحور' : 'الجزء');
+
+        if (!window.confirm(`هل تريد بالتأكيد حذف هذا الـ ${unitName}؟`)) return;
         try {
             const res = await deleteStagePart(partId);
             if (res.status === 'success') {
-                showToast('تم حذف الجزء بنجاح');
+                showToast(`تم حذف ${unitName} بنجاح`);
                 fetchInitialData();
             }
         } catch (err) {
             console.error(err);
-            showToast('فشل حذف الجزء');
+            showToast(`فشل حذف ${unitName}`);
         }
     };
 
@@ -848,9 +876,39 @@ const CentersAndProjects = () => {
                                                     fontWeight: 800,
                                                     color: '#0f172a',
                                                     margin: '0 0 0.5rem 0',
-                                                    letterSpacing: '-0.2px'
+                                                    letterSpacing: '-0.2px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.6rem',
+                                                    flexWrap: 'wrap'
                                                 }}>
                                                     {project.title}
+                                                    {project.recitation_direction === 'REVERSE' && (
+                                                        <span style={{
+                                                            background: '#fef3c7',
+                                                            color: '#b45309',
+                                                            border: '1px solid #fde68a',
+                                                            padding: '0.15rem 0.6rem',
+                                                            borderRadius: '8px',
+                                                            fontSize: '0.78rem',
+                                                            fontWeight: 700
+                                                        }}>
+                                                            🔄 تسميع عكسي
+                                                        </span>
+                                                    )}
+                                                    {project.project_type === 'CUSTOM' && (
+                                                        <span style={{
+                                                            background: project.evaluation_unit === 'LESSONS' ? '#fdf2f8' : project.evaluation_unit === 'TOPICS' ? '#f5f3ff' : '#eff6ff',
+                                                            color: project.evaluation_unit === 'LESSONS' ? '#9d174d' : project.evaluation_unit === 'TOPICS' ? '#6d28d9' : '#1d4ed8',
+                                                            border: `1px solid ${project.evaluation_unit === 'LESSONS' ? '#fbcfe8' : project.evaluation_unit === 'TOPICS' ? '#ddd6fe' : '#bfdbfe'}`,
+                                                            padding: '0.15rem 0.6rem',
+                                                            borderRadius: '8px',
+                                                            fontSize: '0.78rem',
+                                                            fontWeight: 700
+                                                        }}>
+                                                            {project.evaluation_unit === 'LESSONS' ? '📑 تقييم بالدروس' : project.evaluation_unit === 'TOPICS' ? '🎯 تقييم بالمحاور' : '📘 منهجي مخصص (صفحات)'}
+                                                        </span>
+                                                    )}
                                                 </h2>
 
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.5rem' }}>
@@ -950,7 +1008,7 @@ const CentersAndProjects = () => {
                                                 مراحل المشروع
                                             </button>
 
-                                            {/* Button 2: أجزاء المشروع (Orange) */}
+                                            {/* Button 2: أجزاء / دروس / محاور المشروع (Orange) */}
                                             <button
                                                 onClick={() => handleOpenPartsModal(project)}
                                                 style={{
@@ -969,7 +1027,11 @@ const CentersAndProjects = () => {
                                                 onMouseOver={(e) => e.currentTarget.style.background = '#c94e16'}
                                                 onMouseOut={(e) => e.currentTarget.style.background = '#e25c1d'}
                                             >
-                                                أجزاء المشروع
+                                                {project.project_type === 'CUSTOM' && project.evaluation_unit === 'LESSONS'
+                                                    ? 'دروس المشروع'
+                                                    : project.project_type === 'CUSTOM' && project.evaluation_unit === 'TOPICS'
+                                                    ? 'محاور المشروع'
+                                                    : 'أجزاء المشروع'}
                                             </button>
 
                                             {/* Button 3: تعديل (Olive Green) */}
@@ -1173,6 +1235,62 @@ const CentersAndProjects = () => {
                                 >
                                     <option value="QURAN">مشروع قرآني (حفظ ومراجعة)</option>
                                     <option value="CUSTOM">مشروع منهجي مخصص</option>
+                                </select>
+                            </div>
+
+                            {projectType === 'CUSTOM' && (
+                                <div style={{ marginBottom: '1.15rem' }}>
+                                    <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem' }}>
+                                        وحدة التقييم للمشروع *
+                                    </label>
+                                    <select
+                                        value={evaluationUnit}
+                                        onChange={(e) => setEvaluationUnit(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.65rem 0.9rem',
+                                            borderRadius: '8px',
+                                            border: '1.5px solid #cbd5e1',
+                                            fontSize: '0.95rem',
+                                            outline: 'none',
+                                            boxSizing: 'border-box',
+                                            background: '#fff',
+                                            fontFamily: 'inherit'
+                                        }}
+                                    >
+                                        <option value="PAGES">📖 صفحات (تقييم بالصفحات)</option>
+                                        <option value="LESSONS">📑 دروس مخصصة (تقييم بالدروس ومحاورها)</option>
+                                        <option value="TOPICS">🎯 محاور مخصصة (تقييم بالمحاور الرئيسية)</option>
+                                    </select>
+                                    <span style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                                        {evaluationUnit === 'LESSONS' ? 'سيتم تقييم الطالب بناءً على الدروس المخصصة التي يتم إضافتها لمراحل هذا المشروع.' :
+                                         evaluationUnit === 'TOPICS' ? 'سيتم تقييم الطالب بناءً على المحاور المخصصة المضافة لمراحل هذا المشروع.' :
+                                         'يتم التقييم بناءً على أرقام الصفحات.'}
+                                    </span>
+                                </div>
+                            )}
+
+                            <div style={{ marginBottom: '1.15rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem' }}>
+                                    مسار واتجاه التسميع
+                                </label>
+                                <select
+                                    value={recitationDirection}
+                                    onChange={(e) => setRecitationDirection(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.65rem 0.9rem',
+                                        borderRadius: '8px',
+                                        border: '1px solid #cbd5e1',
+                                        fontSize: '0.95rem',
+                                        outline: 'none',
+                                        boxSizing: 'border-box',
+                                        background: '#fff',
+                                        fontFamily: 'inherit'
+                                    }}
+                                >
+                                    <option value="FORWARD">تصاعدي (من البداية إلى النهاية - الافتراضي)</option>
+                                    <option value="REVERSE">عكسي (من النهاية إلى البداية - مثل الناس إلى البقرة)</option>
                                 </select>
                             </div>
 
@@ -1510,113 +1628,148 @@ const CentersAndProjects = () => {
                         boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
                         direction: 'rtl'
                     }}>
-                        <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            marginBottom: '1.25rem',
-                            borderBottom: '1px solid #e2e8f0',
-                            paddingBottom: '0.75rem'
-                        }}>
-                            <div>
-                                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#143818', margin: 0 }}>
-                                    أجزاء المشروع: {selectedProjectForParts.title}
-                                </h3>
-                                <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '4px 0 0 0' }}>
-                                    توزيع وربط الأجزاء القرآنية بمراحل المشروع
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => setIsPartsModalOpen(false)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
-                            >
-                                <X size={20} />
-                            </button>
-                        </div>
+                        {(() => {
+                            const isLessons = selectedProjectForParts.project_type === 'CUSTOM' && selectedProjectForParts.evaluation_unit === 'LESSONS';
+                            const isTopics = selectedProjectForParts.project_type === 'CUSTOM' && selectedProjectForParts.evaluation_unit === 'TOPICS';
+                            const unitName = isLessons ? 'دروس' : isTopics ? 'محاور' : 'أجزاء';
+                            const unitSingle = isLessons ? 'درس' : isTopics ? 'محور' : 'جزء';
 
-                        {/* Add Part Form Box */}
-                        <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem', border: '1px solid #e2e8f0' }}>
-                            <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155', margin: '0 0 0.75rem 0' }}>إضافة جزء جديد للمرحلة</h4>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-                                <select
-                                    value={selectedStageForPart}
-                                    onChange={(e) => setSelectedStageForPart(e.target.value)}
-                                    style={{ padding: '0.55rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', flex: 1, fontFamily: 'inherit' }}
-                                >
-                                    {selectedProjectForParts.stages && selectedProjectForParts.stages.map(s => (
-                                        <option key={s.id} value={s.id}>{s.title}</option>
-                                    ))}
-                                </select>
-
-                                <select
-                                    value={newPartJuz}
-                                    onChange={(e) => {
-                                        const juz = Number(e.target.value);
-                                        setNewPartJuz(juz);
-                                        setNewPartTitle(`الجزء ${juz}`);
-                                    }}
-                                    style={{ padding: '0.55rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', width: '130px', fontFamily: 'inherit' }}
-                                >
-                                    {Array.from({ length: 30 }, (_, i) => i + 1).map(j => (
-                                        <option key={j} value={j}>الجزء {j}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <input
-                                    type="text"
-                                    placeholder="عنوان الجزء (مثال: الجزء 1)"
-                                    value={newPartTitle}
-                                    onChange={(e) => setNewPartTitle(e.target.value)}
-                                    style={{ flex: 1, padding: '0.55rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'inherit' }}
-                                />
-                                <button
-                                    onClick={handleAddPart}
-                                    disabled={addingPart}
-                                    style={{
-                                        background: '#e25c1d',
-                                        color: '#fff',
-                                        border: 'none',
-                                        padding: '0.55rem 1.4rem',
-                                        borderRadius: '8px',
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        fontFamily: 'inherit'
-                                    }}
-                                >
-                                    {addingPart ? 'جاري الإضافة...' : 'حفظ الجزء'}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Existing Parts grouped by stage */}
-                        {selectedProjectForParts.stages && selectedProjectForParts.stages.map(st => (
-                            <div key={st.id} style={{ marginBottom: '1.25rem' }}>
-                                <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#143818', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px', marginBottom: '0.5rem' }}>
-                                    {st.title} ({st.parts ? st.parts.length : 0} أجزاء)
-                                </h4>
-                                {st.parts && st.parts.length > 0 ? (
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '8px' }}>
-                                        {st.parts.map(pt => (
-                                            <div key={pt.id} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.5rem 0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>{pt.title}</span>
-                                                <button onClick={() => handleDeletePart(pt.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}>
-                                                    <Trash size={14} />
-                                                </button>
-                                            </div>
-                                        ))}
+                            return (
+                                <>
+                                    <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        marginBottom: '1.25rem',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        paddingBottom: '0.75rem'
+                                    }}>
+                                        <div>
+                                            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#143818', margin: 0 }}>
+                                                {unitName} المشروع: {selectedProjectForParts.title}
+                                            </h3>
+                                            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '4px 0 0 0' }}>
+                                                {isLessons
+                                                    ? 'إضافة وتوزيع الدروس المخصصة على مراحل المشروع'
+                                                    : isTopics
+                                                    ? 'إضافة وتوزيع المحاور المخصصة على مراحل المشروع'
+                                                    : 'توزيع وربط الأجزاء القرآنية بمراحل المشروع'}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => setIsPartsModalOpen(false)}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
+                                        >
+                                            <X size={20} />
+                                        </button>
                                     </div>
-                                ) : (
-                                    <p style={{ fontSize: '0.82rem', color: '#94a3b8', margin: 0 }}>لا توجد أجزاء لهذه المرحلة بعد.</p>
-                                )}
-                            </div>
-                        ))}
+
+                                    {/* Add Part Form Box */}
+                                    <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem', border: '1px solid #e2e8f0' }}>
+                                        <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155', margin: '0 0 0.75rem 0' }}>
+                                            إضافة {unitSingle} جديد للمرحلة
+                                        </h4>
+                                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                                            <select
+                                                value={selectedStageForPart}
+                                                onChange={(e) => setSelectedStageForPart(e.target.value)}
+                                                style={{ padding: '0.55rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', flex: 1, fontFamily: 'inherit' }}
+                                            >
+                                                {selectedProjectForParts.stages && selectedProjectForParts.stages.map(s => (
+                                                    <option key={s.id} value={s.id}>{s.title}</option>
+                                                ))}
+                                            </select>
+
+                                            {!isLessons && !isTopics && (
+                                                <select
+                                                    value={newPartJuz}
+                                                    onChange={(e) => {
+                                                        const juz = Number(e.target.value);
+                                                        setNewPartJuz(juz);
+                                                        setNewPartTitle(`الجزء ${juz}`);
+                                                    }}
+                                                    style={{ padding: '0.55rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', width: '130px', fontFamily: 'inherit' }}
+                                                >
+                                                    {Array.from({ length: 30 }, (_, i) => i + 1).map(j => (
+                                                        <option key={j} value={j}>الجزء {j}</option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder={
+                                                    isLessons
+                                                        ? 'عنوان الدرس (مثال: الدرس 1: فضائل العلم)'
+                                                        : isTopics
+                                                        ? 'عنوان المحور (مثال: المحور 1: العقيدة الإسلامية)'
+                                                        : 'عنوان الجزء (مثال: الجزء 1)'
+                                                }
+                                                value={newPartTitle}
+                                                onChange={(e) => setNewPartTitle(e.target.value)}
+                                                style={{ flex: 1, padding: '0.55rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'inherit' }}
+                                            />
+                                            <button
+                                                onClick={handleAddPart}
+                                                disabled={addingPart}
+                                                style={{
+                                                    background: '#e25c1d',
+                                                    color: '#fff',
+                                                    border: 'none',
+                                                    padding: '0.55rem 1.4rem',
+                                                    borderRadius: '8px',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer',
+                                                    fontFamily: 'inherit'
+                                                }}
+                                            >
+                                                {addingPart ? 'جاري الإضافة...' : `حفظ ${unitSingle}`}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Existing Parts grouped by stage */}
+                                    {selectedProjectForParts.stages && selectedProjectForParts.stages.map(st => (
+                                        <div key={st.id} style={{ marginBottom: '1.25rem' }}>
+                                            <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#143818', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px', marginBottom: '0.5rem' }}>
+                                                {st.title} ({st.parts ? st.parts.length : 0} {unitName})
+                                            </h4>
+                                            {st.parts && st.parts.length > 0 ? (
+                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '8px' }}>
+                                                    {st.parts.map(pt => (
+                                                        <div key={pt.id} style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.5rem 0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>{pt.title}</span>
+                                                            <button onClick={() => handleDeletePart(pt.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}>
+                                                                <Trash size={14} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p style={{ fontSize: '0.82rem', color: '#94a3b8', margin: 0 }}>لا توجد {unitName} لهذه المرحلة بعد.</p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
         </div>
     );
+};
+
+const CentersAndProjects = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileCentersAndProjects />;
+    }
+
+    return <DesktopCentersAndProjects />;
 };
 
 export default CentersAndProjects;

@@ -5,6 +5,7 @@ import math
 from datetime import datetime, date, timedelta
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from core_system.auth import tenant_auth, get_tenant_db, get_tenant_db_and_obj
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q, Sum, Avg, Count
@@ -29,48 +30,31 @@ logger = logging.getLogger(__name__)
 import requests
 from django.http import HttpResponse
 
+IMAGE_PROXY_MAX_BYTES = 5 * 1024 * 1024
+
+
 def image_proxy_view(request):
+    """وكيل صور: عام عمداً (وسوم img لا ترسل Authorization) لذا يُقيَّد بروابط عامة وصور فقط وبحجم أقصى."""
+    from core_system.net import is_public_http_url
     url = request.GET.get('url')
     if not url:
         return HttpResponse("Missing url parameter", status=400)
+    if not is_public_http_url(url):
+        return HttpResponse("رابط غير مسموح", status=400)
     try:
-        r = requests.get(url, stream=True, timeout=5)
-        content_type = r.headers.get('Content-Type', 'image/jpeg')
-        if not content_type.startswith('image/'):
-            content_type = 'image/jpeg'
-        response = HttpResponse(r.raw, content_type=content_type)
+        r = requests.get(url, timeout=5, allow_redirects=False, stream=True)
+        content_type = r.headers.get('Content-Type', '')
+        if r.status_code != 200 or not content_type.startswith('image/') or 'svg' in content_type:
+            return HttpResponse("ليس ملف صورة", status=415)
+        body = r.raw.read(IMAGE_PROXY_MAX_BYTES + 1, decode_content=True)
+        if len(body) > IMAGE_PROXY_MAX_BYTES:
+            return HttpResponse("الصورة كبيرة جداً", status=413)
+        response = HttpResponse(body, content_type=content_type)
         response['Cache-Control'] = 'public, max-age=86400'
+        response['X-Content-Type-Options'] = 'nosniff'
         return response
-    except Exception as e:
-        return HttpResponse(str(e), status=400)
-
-def get_tenant_db_and_obj(request):
-    tenant_id = request.headers.get('Tenant-ID')
-    if not tenant_id:
-        return 'default', None
-    try:
-        from core_system.tenants.models import Tenant
-        tenant = Tenant.objects.using('default').get(id=tenant_id)
-        db_name = tenant.db_name
-        if db_name not in settings.DATABASES:
-            new_db_config = settings.DATABASES['default'].copy()
-            new_db_config.update({
-                'NAME': tenant.db_name,
-                'USER': tenant.db_user or settings.DATABASES['default'].get('USER'),
-                'PASSWORD': tenant.db_password_hash or settings.DATABASES['default'].get('PASSWORD'),
-                'HOST': tenant.db_host or 'localhost',
-                'PORT': tenant.db_port or 5432,
-            })
-            settings.DATABASES[db_name] = new_db_config
-        return db_name, tenant
     except Exception:
-        return 'default', None
-
-
-def get_tenant_db(request):
-    db_name, _ = get_tenant_db_and_obj(request)
-    return db_name
-
+        return HttpResponse("تعذر جلب الملف", status=400)
 
 def parse_body(request):
     if not request.body:
@@ -118,6 +102,7 @@ def resolve_student_for_user(db, profile, requested_student_id=None):
 # ==========================================
 
 @csrf_exempt
+@tenant_auth()
 def student_points_list_view(request):
     """
     عرض قائمة الطلاب مع رصيد النقاط والبحث والفلترة
@@ -173,6 +158,7 @@ def student_points_list_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def grant_bonus_points_view(request):
     """
     منح مكافأة سلوكية لطالب (+1 نقطة لسلوك ممتاز)
@@ -216,6 +202,7 @@ def grant_bonus_points_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def points_transactions_view(request):
     """
     كشف حساب وسجل حركات النقاط
@@ -267,6 +254,7 @@ def points_transactions_view(request):
 # ==========================================
 
 @csrf_exempt
+@tenant_auth()
 def rewards_list_create_view(request):
     """
     قائمة المكافآت وإضافة مكافأة جديدة
@@ -352,6 +340,7 @@ def rewards_list_create_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def reward_detail_view(request, pk):
     """
     تعديل، حذف، وتفعيل/تعطيل مكافأة
@@ -417,6 +406,7 @@ def reward_detail_view(request, pk):
 
 
 @csrf_exempt
+@tenant_auth()
 def redeem_reward_view(request):
     """
     استبدال فوري لمكافأة للطالب وصرفها
@@ -461,6 +451,7 @@ def redeem_reward_view(request):
 # ==========================================
 
 @csrf_exempt
+@tenant_auth()
 def admin_claims_list_view(request):
     """
     عرض طلبات المكافآت مع الفلترة حسب الحالة، والبحث
@@ -536,6 +527,7 @@ def admin_claims_list_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def admin_claim_action_view(request, pk):
     """
     تنفيذ إجراء على طلب مكافأة:
@@ -604,6 +596,7 @@ def admin_claim_action_view(request, pk):
 # ==========================================
 
 @csrf_exempt
+@tenant_auth()
 def store_settings_view(request):
     """
     عرض وتعديل إعدادات فتح وإغلاق متجر النقاط على مستويي المركز والمسجد
@@ -698,6 +691,7 @@ def store_settings_view(request):
 # ==========================================
 
 @csrf_exempt
+@tenant_auth()
 def student_portal_dashboard_view(request):
     """
     الواجهة الرئيسية الشاملة لحساب الطالب / ولي الأمر الموحد
@@ -775,10 +769,14 @@ def student_portal_dashboard_view(request):
     follow_up_records = []
     for a in att_qs[:40]:
         rec = rec_by_att.get(str(a.id))
-        eval_text = "-"
         if rec:
             type_label = rec.get_recitation_type_display() if hasattr(rec, 'get_recitation_type_display') else rec.recitation_type
-            eval_text = f"{rec.grade} ({type_label} - ص {rec.page_number})"
+            if rec.lesson_title:
+                eval_text = f"{rec.grade} ({type_label} - درس: {rec.lesson_title})"
+            elif rec.is_surah_evaluation and rec.surah_number:
+                eval_text = f"{rec.grade} ({type_label} - سورة {rec.surah_number})"
+            else:
+                eval_text = f"{rec.grade} ({type_label} - ص {rec.page_number})"
         elif a.status in ['PRESENT', 'LATE']:
             eval_text = "حضور بدون تسميع"
 
@@ -792,6 +790,9 @@ def student_portal_dashboard_view(request):
             'attendance_status': a.status,
             'is_late': a.is_late,
             'evaluation': eval_text,
+            'lesson_title': rec.lesson_title if rec else None,
+            'surah_number': rec.surah_number if rec else None,
+            'is_surah_evaluation': rec.is_surah_evaluation if rec else False,
             'notes': a.notes or (rec.notes if rec else "") or ""
         })
 
@@ -892,6 +893,7 @@ def student_portal_dashboard_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_portal_points_store_view(request):
     """
     بيانات تبويب 'النقاط والمكافآت' للطالب / ولي الأمر:
@@ -982,6 +984,7 @@ def student_portal_points_store_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_portal_claim_reward_view(request):
     """
     إنشاء طلب شراء مكافأة جديد للطالب
@@ -1034,6 +1037,7 @@ def student_portal_claim_reward_view(request):
 # ==========================================
 
 @csrf_exempt
+@tenant_auth()
 def competitions_list_create_view(request):
     """
     قائمة المسابقات وإنشاء مسابقة جديدة
@@ -1118,6 +1122,7 @@ def competitions_list_create_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def competition_detail_view(request, pk):
     """
     تفاصيل مسابقة وتعديلها وحذفها مع كافة أسئلتها
@@ -1193,6 +1198,7 @@ def competition_detail_view(request, pk):
 
 
 @csrf_exempt
+@tenant_auth()
 def competition_questions_view(request, pk):
     """
     إضافة سؤال جديد لمسابقة
@@ -1250,6 +1256,7 @@ def competition_questions_view(request, pk):
 
 
 @csrf_exempt
+@tenant_auth()
 def question_detail_view(request, pk):
     """
     تعديل أو حذف سؤال
@@ -1297,6 +1304,7 @@ def question_detail_view(request, pk):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_competitions_view(request):
     """
     قائمة المسابقات المتاحة للطالب مع فحص إمكانية المشاركة والنتائج
@@ -1348,6 +1356,7 @@ def student_competitions_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_start_competition_view(request, pk):
     """
     بدء الطالب لمحاولة المسابقة وبدء العداد الزمني
@@ -1415,6 +1424,7 @@ def student_start_competition_view(request, pk):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_submit_competition_view(request, pk):
     """
     تسليم إجابات المسابقة وحساب النتيجة آلياً ومنح النقاط
@@ -1527,6 +1537,7 @@ def student_submit_competition_view(request, pk):
 # =========================================================
 
 @csrf_exempt
+@tenant_auth()
 def student_portal_follow_up_view(request):
     """
     سجل المتابعة التاريخي الشامل للطالب
@@ -1775,6 +1786,7 @@ def student_portal_follow_up_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_portal_notifications_view(request):
     """
     جلب قائمة إشعارات الطالب / ولي الأمر
@@ -1831,6 +1843,7 @@ def student_portal_notifications_view(request):
 
 
 @csrf_exempt
+@tenant_auth()
 def student_portal_mark_notification_read_view(request, pk=None):
     """
     تحديد إشعار أو جميع الإشعارات كمقروءة

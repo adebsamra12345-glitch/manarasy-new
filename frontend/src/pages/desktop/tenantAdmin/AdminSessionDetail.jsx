@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
     Bell, CaretDown, Users, MagnifyingGlass, UserCircle, 
     Clock, FilePdf, ArrowRight, Check, CheckCircle, WarningCircle, 
-    DotsThreeVertical, PencilSimple 
+    DotsThreeVertical, PencilSimple, BookmarkSimple 
 } from '@phosphor-icons/react';
 import { getHalaqat, getTeacherSessionDetail, updateSessionDetails } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
@@ -23,13 +23,7 @@ export const BEHAVIOR_OPTIONS = [
     { label: 'مغادرة الحلقة دون عذر', value: 0, code: 'LEFT_WITHOUT_EXCUSE' },
 ];
 
-const AdminSessionDetail = () => {
-    const { isMobile } = useDeviceType();
-
-    if (isMobile) {
-        return <MobileAdminSessionDetail />;
-    }
-
+const DesktopAdminSessionDetail = () => {
     const { ringId, sessionId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
@@ -54,6 +48,7 @@ const AdminSessionDetail = () => {
     const [originalSessionDate, setOriginalSessionDate] = useState('');
     const [showDatePickerModal, setShowDatePickerModal] = useState(false);
     const [conflictDate, setConflictDate] = useState('');
+    const [sessionProject, setSessionProject] = useState(null);
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -97,6 +92,7 @@ const AdminSessionDetail = () => {
                 if (response.status === 'success') {
                     setStudents(response.attendance || []);
                     setEvaluationTemplate(response.evaluation_template || null);
+                    setSessionProject(response.project || null);
                     if (response.session_date) {
                         const dStr = response.session_date.slice(0, 10);
                         setSessionDate(dStr);
@@ -234,14 +230,28 @@ const AdminSessionDetail = () => {
             let updatedEvals = st.evaluations || [];
             if (newEvaluation) {
                 if (isUpdate) {
-                    updatedEvals = updatedEvals.map(ev =>
-                        ev.page_number === newEvaluation.page_number ? newEvaluation : ev
-                    );
+                    updatedEvals = updatedEvals.map(ev => {
+                        if (newEvaluation.lesson_title && ev.lesson_title === newEvaluation.lesson_title) {
+                            return newEvaluation;
+                        }
+                        return ev.page_number === newEvaluation.page_number ? newEvaluation : ev;
+                    });
                 } else {
                     updatedEvals = [...updatedEvals, newEvaluation];
                 }
             }
-            return { ...st, reached_page: newReachedPage, evaluations: updatedEvals };
+            const updatedEnrollment = st.enrollment ? {
+                ...st.enrollment,
+                part_id: newEvaluation?.part_id || st.enrollment.part_id,
+                part_title: newEvaluation?.part_title || newEvaluation?.lesson_title || st.enrollment.part_title,
+                stage_title: newEvaluation?.stage_title || st.enrollment.stage_title
+            } : (newEvaluation?.part_title ? {
+                part_id: newEvaluation.part_id,
+                part_title: newEvaluation.part_title,
+                stage_title: newEvaluation.stage_title
+            } : null);
+
+            return { ...st, reached_page: newReachedPage, evaluations: updatedEvals, enrollment: updatedEnrollment };
         }));
     };
 
@@ -472,6 +482,21 @@ const AdminSessionDetail = () => {
                                         <UserCircle size={24} color="#64b5f6" weight="fill" />
                                         <span>{student.student_name}</span>
                                     </div>
+                                    {sessionProject?.evaluation_unit === 'LESSONS' || sessionProject?.evaluation_unit === 'TOPICS' ? (
+                                        <span style={{ fontSize: '0.78rem', color: '#1565c0', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.2rem' }}>
+                                            <BookmarkSimple size={13} weight="bold" />
+                                            {sessionProject?.evaluation_unit === 'LESSONS' ? 'الدرس' : 'المحور'} الحالي: {student.enrollment?.part_title || 'لم يُحدد'}
+                                            {student.enrollment?.stage_title && (
+                                                <span style={{ fontSize: '0.72rem', color: '#666', fontWeight: 'normal' }}>
+                                                    ({student.enrollment.stage_title})
+                                                </span>
+                                            )}
+                                        </span>
+                                    ) : (
+                                        <span style={{ fontSize: '0.78rem', color: '#e65100', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.2rem' }}>
+                                            صفحة الوصول: {student.reached_page || 1}
+                                        </span>
+                                    )}
                                     {student.is_late && (
                                         <span style={{
                                             marginTop: '0.25rem',
@@ -730,7 +755,7 @@ const AdminSessionDetail = () => {
             <RecitationModal 
                 isOpen={!!evaluatingStudent}
                 onClose={() => setEvaluatingStudent(null)}
-                student={evaluatingStudent}
+                student={evaluatingStudent ? { ...evaluatingStudent, project: evaluatingStudent.project || sessionProject } : null}
                 evaluationTemplate={evaluationTemplate}
                 onEvaluationSuccess={handleEvaluationSuccess}
                 readOnly={!isEditMode}
@@ -750,6 +775,16 @@ const AdminSessionDetail = () => {
             />
         </div>
     );
+};
+
+const AdminSessionDetail = () => {
+    const { isMobile } = useDeviceType();
+
+    if (isMobile) {
+        return <MobileAdminSessionDetail />;
+    }
+
+    return <DesktopAdminSessionDetail />;
 };
 
 export default AdminSessionDetail;

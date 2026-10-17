@@ -34,9 +34,17 @@ def check_and_notify_stage_exam(db_name, student, stage, reached_page):
     if not last_part:
         return
 
-    _, stage_end_page = get_part_page_range(last_part)
+    s_page, stage_end_page = get_part_page_range(last_part)
+    is_reverse = getattr(project, 'recitation_direction', 'FORWARD') == 'REVERSE'
+    approaching = False
+    if is_reverse:
+        target_end = min(s_page or 1, stage_end_page or 1)
+        approaching = reached_page <= (target_end + 2)
+    else:
+        target_end = max(s_page or 1, stage_end_page or 1)
+        approaching = reached_page >= (target_end - 2)
 
-    if reached_page >= (stage_end_page - 2):
+    if approaching:
         from tenant_modules.centers_and_projects.models import StudentExamResult, SystemNotification
         
         existing_result = StudentExamResult.objects.using(db_name).filter(
@@ -112,14 +120,20 @@ def resolve_stage_and_part(db_name, project, reached_page, student=None):
         parts = stage.parts.all().order_by('order', 'created_at')
         for part in parts:
             s_page, e_page = get_part_page_range(part)
-            if s_page <= page_num <= e_page:
-                check_and_notify_stage_exam(db_name, student, stage, page_num)
-                return stage, part
+            if s_page is not None and e_page is not None:
+                min_p = min(s_page, e_page)
+                max_p = max(s_page, e_page)
+                if min_p <= page_num <= max_p:
+                    check_and_notify_stage_exam(db_name, student, stage, page_num)
+                    return stage, part
 
     check_and_notify_stage_exam(db_name, student, last_stage, page_num)
     if last_part:
-        last_e_page = get_part_page_range(last_part)[1]
-        if page_num > last_e_page:
+        s_p, e_p = get_part_page_range(last_part)
+        is_rev = getattr(project, 'recitation_direction', 'FORWARD') == 'REVERSE'
+        if is_rev and page_num < min(s_p or 1, e_p or 1):
+            return last_stage, last_part
+        elif not is_rev and page_num > max(s_p or 1, e_p or 1):
             return last_stage, last_part
 
     return first_stage, first_part

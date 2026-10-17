@@ -1,0 +1,225 @@
+/* ==========================================================================
+   Manarasy — طبقة التحديث البصري (UI/UX Modernization)
+   --------------------------------------------------------------------------
+   * إضافية بالكامل: لا تغيّر بنية العناصر ولا المنطق، وتُحمَّل آخر ملف CSS (App.jsx).
+   * الحركات تعتمد على transform/opacity فقط (GPU) وبمدد قصيرة.
+   * تُعطَّل كلها عند prefers-reduced-motion.
+   ========================================================================== */
+
+:root {
+    /* رموز حركة وظلال موحّدة (لا تستبدل متغيرات الصفحات الحالية) */
+    --mn-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --mn-ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+    --mn-dur-fast: 150ms;
+    --mn-dur: 240ms;
+    --mn-dur-slow: 420ms;
+
+    --mn-focus: #d15c23;
+    --mn-shadow-hover: 0 12px 28px -10px rgba(27, 54, 23, 0.22), 0 4px 10px -4px rgba(27, 54, 23, 0.08);
+    --mn-shadow-press: 0 2px 6px rgba(27, 54, 23, 0.14);
+    --mn-surface-tint: rgba(27, 54, 23, 0.04);
+}
+
+/* ---------- أساسيات القراءة والتمرير ---------- */
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    line-height: 1.6;
+    overflow-x: hidden;               /* يمنع التمرير الأفقي للصفحة على الهواتف */
+}
+
+::selection { background: rgba(209, 92, 35, 0.22); color: inherit; }
+
+img, svg, video, canvas { max-width: 100%; }
+
+/* شريط تمرير أنيق (لا يؤثر على الوظيفة) */
+* { scrollbar-width: thin; scrollbar-color: rgba(27, 54, 23, 0.28) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: rgba(27, 54, 23, 0.25); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(27, 54, 23, 0.4); }
+
+/* ---------- حلقة تركيز واضحة (وصولية) ---------- */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--mn-focus);
+    outline-offset: 2px;
+    border-radius: 8px;
+}
+
+/* ---------- انتقالات سلسة للعناصر التفاعلية ---------- */
+:where(button, a, input, select, textarea, [role="button"], .icon-btn, .nav-item) {
+    transition:
+        background-color var(--mn-dur) var(--mn-ease-soft),
+        color var(--mn-dur) var(--mn-ease-soft),
+        border-color var(--mn-dur) var(--mn-ease-soft),
+        box-shadow var(--mn-dur) var(--mn-ease-soft),
+        transform var(--mn-dur-fast) var(--mn-ease);
+}
+
+:where(input, select, textarea):focus {
+    box-shadow: 0 0 0 3px rgba(209, 92, 35, 0.14);
+    border-color: var(--mn-focus);
+}
+
+/* ---------- الأزرار: Hover / Press ---------- */
+@media (hover: hover) {
+    :where(.btn-primary, .pl-btn, .register-btn-primary, .pr-btn-sm,
+           .pr-btn-secondary, .pr-action-btn-green, .pl-m-btn, .primary, .ghost):not(:disabled):not([aria-disabled="true"]):hover {
+        transform: translateY(-1px);
+        box-shadow: var(--mn-shadow-hover);
+    }
+    .icon-btn:hover { transform: translateY(-1px) scale(1.05); box-shadow: var(--mn-shadow-hover); }
+}
+
+:where(button, .btn-primary, .pl-btn, .register-btn-primary, .primary, .ghost, .icon-btn):not(:disabled):active {
+    transform: translateY(0) scale(0.97);
+    box-shadow: var(--mn-shadow-press);
+    transition-duration: 60ms;
+}
+
+:where(button, .btn-primary, .pl-btn):disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* ---------- البطاقات: رفع خفيف عند المرور ---------- */
+.stat-card, .register-card, .cards-grid > *, .rings-list > *, .sessions-list > * {
+    transition: transform var(--mn-dur) var(--mn-ease), box-shadow var(--mn-dur) var(--mn-ease-soft),
+                border-color var(--mn-dur) var(--mn-ease-soft);
+}
+@media (hover: hover) {
+    .stat-card:hover, .cards-grid > *:hover, .rings-list > *:hover, .sessions-list > *:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--mn-shadow-hover);
+    }
+}
+
+/* ---------- عناصر القوائم الجانبية ---------- */
+.nav-item { position: relative; }
+@media (hover: hover) { .nav-item:hover { transform: translateX(-2px); } }   /* RTL: حركة نحو الداخل */
+
+/* ---------- صفوف الجداول ---------- */
+:where(tbody tr) { transition: background-color var(--mn-dur-fast) var(--mn-ease-soft); }
+@media (hover: hover) { :where(tbody tr):hover { background-color: var(--mn-surface-tint); } }
+
+/* ---------- ظهور العناصر (Reveal) ---------- */
+@keyframes mn-fade-up {
+    from { opacity: 0; transform: translate3d(0, 14px, 0); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes mn-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mn-pop-in {
+    from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.96); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes mn-shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+}
+@keyframes mn-spin { to { transform: rotate(360deg); } }
+@keyframes mn-pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* جذر كل صفحة يظهر بتلاشٍ وصعود خفيف؛ backwards كي لا يبقى transform بعد الانتهاء (يحمي العناصر fixed) */
+.main-content > :not(.mobile-topbar):not(nav) { animation: mn-fade-in var(--mn-dur-slow) var(--mn-ease) backwards; }
+
+/* تتابع ظهور لعناصر الشبكات والقوائم الشائعة (حتى 8 عناصر) */
+.dashboard-container > *, .cards-grid > *, .rings-list > *, .sessions-list > *,
+.dashboard-container .stat-card {
+    animation: mn-fade-up var(--mn-dur-slow) var(--mn-ease) backwards;
+}
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(1) { animation-delay: 0ms; }
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(2) { animation-delay: 50ms; }
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(3) { animation-delay: 100ms; }
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(4) { animation-delay: 150ms; }
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(5) { animation-delay: 200ms; }
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(6) { animation-delay: 240ms; }
+:is(.dashboard-container, .cards-grid, .rings-list, .sessions-list) > :nth-child(n+7) { animation-delay: 280ms; }
+
+/* النوافذ المنبثقة */
+:is([class*="modal-overlay"], [class*="modal-backdrop"]) { animation: mn-fade-in var(--mn-dur) var(--mn-ease-soft) backwards; }
+:is([class*="modal-box"], [class*="modal-content"], [class*="modal-card"]) { animation: mn-pop-in var(--mn-dur-slow) var(--mn-ease) backwards; }
+
+/* ---------- التحميل ---------- */
+.skeleton, [class*="skeleton"]:not([class*="wrapper"]):not([class*="container"]) {
+    background: linear-gradient(100deg, rgba(0,0,0,0.05) 30%, rgba(0,0,0,0.10) 50%, rgba(0,0,0,0.05) 70%);
+    background-size: 200% 100%;
+    animation: mn-shimmer 1.4s linear infinite;
+    border-radius: 8px;
+}
+.spin-animation, .spin-icon { animation: mn-spin 0.9s linear infinite; will-change: transform; }
+.loading-text, .loading-state { animation: mn-pulse-soft 1.6s var(--mn-ease-soft) infinite; }
+
+/* ==========================================================================
+   التجاوب (Responsive)
+   ========================================================================== */
+
+/* شاشات كبيرة جداً: قراءة مريحة بدل تمدد المحتوى */
+@media (min-width: 1600px) {
+    .dashboard-container { max-width: 1680px; }
+}
+
+/* الشاشات المتوسطة: شريط جانبي مدمج كي لا يستهلك 40% من العرض */
+@media (min-width: 769px) and (max-width: 1100px) {
+    :root { --sidebar-width: 232px; }
+    .sidebar-container { padding: 1rem; }
+}
+
+/* الأجهزة اللوحية (768–1024) */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .dashboard-container { padding: 1.5rem 1.5rem 3rem; }
+    .main-content { padding: 1.25rem; }
+    .dashboard-header { flex-wrap: wrap; gap: 1rem; }
+    .header-actions { flex-wrap: wrap; }
+    .cards-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+}
+
+/* الهواتف */
+@media (max-width: 768px) {
+    .dashboard-container { padding: 1rem 1rem 5.5rem; }
+    .dashboard-header { flex-direction: column; align-items: stretch; gap: 0.75rem; margin-bottom: 1.25rem; }
+    .header-actions { flex-wrap: wrap; gap: 0.5rem; }
+
+    /* لا حاجة لشريط تمرير ظاهر في تخطيط الهاتف */
+    .main-content { scrollbar-width: none; }
+    .main-content::-webkit-scrollbar { display: none; }
+
+    /* منع تكبير iOS التلقائي عند التركيز على الحقول */
+    input, select, textarea { font-size: 16px; }
+
+    /* الجداول الواسعة تُمرَّر أفقياً داخل حاويتها بدل كسر الصفحة */
+    .table-responsive-wrapper, .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* النوافذ المنبثقة تملأ عرض الشاشة تقريباً */
+    :is([class*="modal-box"], [class*="modal-content"]) { max-width: calc(100vw - 1.5rem); max-height: 92dvh; }
+}
+
+/* أجهزة اللمس: أهداف لمس لا تقل عن 44px */
+@media (hover: none) and (pointer: coarse) {
+    :where(button, .icon-btn, .nav-item, select, [role="button"]) { min-height: 44px; }
+    .icon-btn { min-width: 44px; }
+}
+
+/* مساحة آمنة للهواتف ذات الحواف (Notch) */
+@supports (padding: max(0px)) {
+    @media (max-width: 768px) {
+        .main-content { padding-bottom: max(5rem, calc(4.5rem + env(safe-area-inset-bottom))); }
+    }
+}
+
+/* ==========================================================================
+   تقليل الحركة: احترام تفضيل المستخدم (وصولية)
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        animation-delay: 0ms !important;
+        transition-duration: 0.01ms !important;
+    }
+    .spin-animation, .spin-icon { animation-duration: 1.5s !important; animation-iteration-count: infinite !important; }
+}
+
+/* الطباعة: بلا حركة أو ظلال */
+@media print {
+    *, *::before, *::after { animation: none !important; transition: none !important; box-shadow: none !important; }
+}
