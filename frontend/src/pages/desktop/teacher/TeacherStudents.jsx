@@ -346,7 +346,7 @@ const TeacherStudents = () => {
 
             {/* Grid */}
             {loading ? (
-                <div style={{ textAlign: 'center', color: '#558b2f', padding: '2rem' }}>ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ الطلاب...</div>
+                <div style={{ textAlign: 'center', color: '#558b2f', padding: '2rem' }}>جاري تحميل الطلاب...</div>
             ) : (
                 <div style={{
                     display: 'grid',

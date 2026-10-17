@@ -11,7 +11,8 @@ import ReceiptViewer from './ReceiptViewer';
 import Pagination from './Pagination';
 import { EVENT_LABEL, FILTERS, SOURCE_LABEL, STATUS_META, fmtDate } from './platformConstants';
 import './platform.css';
-
+import useDeviceType from '../../hooks/useDeviceType';
+import MobileRegistrationRequests from '../mobile/platform/MobileRegistrationRequests';
 export const StatusBadge = ({ status }) => {
     const meta = STATUS_META[status] || { label: status, tone: 'gray' };
     return <span className={`pl-badge ${meta.tone}`}>{meta.label}</span>;
@@ -26,7 +27,8 @@ const RegistrationRequests = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [selectedId, setSelectedId] = useState(null);
-
+    const { isMobile } = useDeviceType();
+    if (isMobile) return <MobileRegistrationRequests />;
     // Debounce للبحث
     useEffect(() => {
         const t = setTimeout(() => { setDebouncedQ(q.trim()); setPage(1); }, 350);

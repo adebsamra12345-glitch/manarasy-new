@@ -124,7 +124,7 @@ const CentersAndProjects = () => {
                 setTestRubrics(rubricsRes.data);
             }
             if (centersRes && centersRes.data && centersRes.data.length > 0) {
-                setCentersList([{ id: 'all', name: 'المركز الرئيسي' }, ...centersRes.data.filter(c => c.name !== 'المركز الرئيسي')]);
+                setCentersList(centersRes.data);
                 setSelectedCenters(centersRes.data.map(c => c.id));
             }
         } catch (err) {
@@ -143,7 +143,7 @@ const CentersAndProjects = () => {
         setToastMessage(msg);
         setTimeout(() => setToastMessage(''), 3500);
     };
-
+    const availableCenters = centersList.filter(c => c.id !== 'all');
     // Open Modal: New Project
     const handleOpenNewProjectModal = () => {
         setEditingProject(null);
@@ -151,12 +151,9 @@ const CentersAndProjects = () => {
         setProjectDesc('');
         setProjectType('QURAN');
         setIsGlobal(true);
+        setSelectedCenters(availableCenters.map(c => c.id));
         setRequireExam(false);
-        if (evaluationTemplates.length > 0) {
-            setSelectedEvalId(evaluationTemplates[0].id);
-        } else {
-            setSelectedEvalId('');
-        }
+        setSelectedEvalId(evaluationTemplates.length > 0 ? evaluationTemplates[0].id : '');
         setSelectedRubricId('');
         setIsProjectModalOpen(true);
     };
@@ -167,16 +164,45 @@ const CentersAndProjects = () => {
         setProjectTitle(proj.title || '');
         setProjectDesc(proj.description || '');
         setProjectType(proj.project_type || 'QURAN');
-        setIsGlobal(proj.is_global ?? true);
+        const isProjGlobal = proj.is_global ?? false;
+        setIsGlobal(isProjGlobal);
         setRequireExam(proj.require_exam_for_all_stages || false);
         setSelectedEvalId(proj.evaluation_template_id || proj.evaluation_template?.id || '');
         setSelectedRubricId(proj.test_rubric_id || proj.test_rubric?.id || '');
-        if (proj.centers && proj.centers.length > 0) {
+        if (isProjGlobal) {
+            setSelectedCenters(availableCenters.map(c => c.id));
+        } else if (proj.centers && proj.centers.length > 0) {
             setSelectedCenters(proj.centers.map(c => c.id));
+        } else {
+            setSelectedCenters([]);
         }
         setIsProjectModalOpen(true);
     };
-
+    const handleToggleGlobal = (checked) => {
+        setIsGlobal(checked);
+        if (checked) {
+            // عند التفعيل: اختيار جميع المراكز
+            setSelectedCenters(availableCenters.map(c => c.id));
+        }
+    };
+    const handleToggleCenterChip = (centerId) => {
+        setSelectedCenters(prev => {
+            let updated;
+            if (prev.includes(centerId)) {
+                // إزالة المركز
+                updated = prev.filter(id => id !== centerId);
+                setIsGlobal(false); // طالما تم إلغاء مركز فلم يعد عاماً لكل المراكز
+            } else {
+                // إضافة المركز
+                updated = [...prev, centerId];
+                // إذا أصبح عدد المراكز المختارة يساوي إجمالي المراكز المتاحة
+                if (updated.length === availableCenters.length) {
+                    setIsGlobal(true);
+                }
+            }
+            return updated;
+        });
+    };
     // Save Project (Create / Update)
     const handleSaveProject = async (e) => {
         e.preventDefault();
@@ -188,7 +214,10 @@ const CentersAndProjects = () => {
             showToast('يرجى تحديد نموذج التقييم');
             return;
         }
-
+        if (!isGlobal && selectedCenters.length === 0) {
+            showToast('يرجى اختيار مركز واحد على الأقل أو جعل المشروع متاحاً لجميع المراكز');
+            return;
+        }
         setSaving(true);
         const payload = {
             title: projectTitle.trim(),
@@ -198,7 +227,7 @@ const CentersAndProjects = () => {
             require_exam_for_all_stages: requireExam,
             evaluation_template_id: selectedEvalId,
             test_rubric_id: selectedRubricId || null,
-            center_ids: isGlobal ? [] : selectedCenters
+            center_ids: isGlobal ? availableCenters.map(c => c.id) : selectedCenters
         };
 
         try {
@@ -824,7 +853,7 @@ const CentersAndProjects = () => {
                                                     {project.title}
                                                 </h2>
 
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.5rem' }}>
                                                     {/* Meta 1: Stages Count */}
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                         <span style={{
@@ -851,6 +880,47 @@ const CentersAndProjects = () => {
                                                         <span style={{ color: '#64748b', fontSize: '0.94rem', fontWeight: 600 }}>
                                                             نموذج التقييم : {evalTitle}
                                                         </span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+                                                        <span style={{ color: '#475569', fontSize: '0.88rem', fontWeight: 700 }}>المراكز:</span>
+                                                        {project.is_global ? (
+                                                            <span style={{
+                                                                background: '#dcfce7',
+                                                                color: '#166534',
+                                                                padding: '0.2rem 0.65rem',
+                                                                borderRadius: '12px',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: 700,
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '4px'
+                                                            }}>
+                                                                🌍 متاح لجميع المراكز
+                                                            </span>
+                                                        ) : (project.centers && project.centers.length > 0) ? (
+                                                            project.centers.map(c => (
+                                                                <span
+                                                                    key={c.id}
+                                                                    style={{
+                                                                        background: '#f1f5f9',
+                                                                        color: '#334155',
+                                                                        border: '1px solid #cbd5e1',
+                                                                        padding: '0.2rem 0.65rem',
+                                                                        borderRadius: '12px',
+                                                                        fontSize: '0.8rem',
+                                                                        fontWeight: 600,
+                                                                        display: 'inline-flex',
+                                                                        alignItems: 'center',
+                                                                        gap: '4px'
+                                                                    }}
+                                                                >
+                                                                    <MapPin size={12} color="#64748b" />
+                                                                    {c.name}
+                                                                </span>
+                                                            ))
+                                                        ) : (
+                                                            <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>لم تعين مراكز بعد</span>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1112,6 +1182,7 @@ const CentersAndProjects = () => {
                                         type="checkbox"
                                         checked={isGlobal}
                                         onChange={(e) => setIsGlobal(e.target.checked)}
+                                        style={{ width: '17px', height: '17px', accentColor: '#4a6b18' }}
                                     />
                                     <span>مشروع عام (متاح لجميع المراكز)</span>
                                 </label>
@@ -1121,10 +1192,57 @@ const CentersAndProjects = () => {
                                         type="checkbox"
                                         checked={requireExam}
                                         onChange={(e) => setRequireExam(e.target.checked)}
+                                        style={{ width: '17px', height: '17px', accentColor: '#4a6b18' }}
                                     />
                                     <span>اشتراط اختبار لكل مرحلة</span>
                                 </label>
                             </div>
+                            {/* قسم رقائق (وسوم) المراكز المعتمدة للمشروع */}
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <label style={{ fontSize: '0.92rem', fontWeight: 700, color: '#334155' }}>
+                                        المراكز المعتمدة للمشروع:
+                                    </label>
+                                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                        {isGlobal ? 'مفعل في كافة المراكز' : `تم تحديد ${selectedCenters.length} من أصل ${availableCenters.length}`}
+                                    </span>
+                                </div>
+                                {/* حاوية الرقائق (Chips Container) */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', background: '#f8fafc', padding: '0.75rem', borderRadius: '10px', border: '1px solid #e2e8f0', minHeight: '48px' }}>
+                                    {availableCenters.map(center => {
+                                        const isSelected = selectedCenters.includes(center.id);
+                                        return (
+                                            <button
+                                                key={center.id}
+                                                type="button"
+                                                onClick={() => handleToggleCenterChip(center.id)}
+                                                style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    padding: '0.4rem 0.85rem',
+                                                    borderRadius: '20px',
+                                                    fontSize: '0.85rem',
+                                                    fontWeight: 600,
+                                                    border: isSelected ? '1.5px solid #4a6b18' : '1.5px solid #cbd5e1',
+                                                    background: isSelected ? '#ecfccb' : '#ffffff',
+                                                    color: isSelected ? '#365314' : '#64748b',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease',
+                                                    fontFamily: 'inherit'
+                                                }}
+                                            >
+                                                <MapPin size={14} weight={isSelected ? 'fill' : 'regular'} color={isSelected ? '#4a6b18' : '#94a3b8'} />
+                                                <span>{center.name}</span>
+                                                {isSelected && (
+                                                    <span style={{ fontSize: '0.75rem', marginRight: '2px', fontWeight: 'bold' }}>✓</span>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginTop: '1rem' }}>
                                 {/* Delete button if editing */}

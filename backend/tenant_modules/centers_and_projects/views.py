@@ -389,11 +389,31 @@ def center_list_create_view(request):
                 import uuid
                 code = f"CTR-{uuid.uuid4().hex[:6].upper()}"
 
+            mgr_id = data.get('manager_id')
+            mgr_user = None
+            if mgr_id:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                try:
+                    mgr_user = User.objects.using(db_name).get(id=mgr_id)
+                except User.DoesNotExist:
+                    pass
+
             center = Center.objects.using(db_name).create(
                 name=data['name'].strip(),
                 code=code.strip(),
-                address=data.get('address', '').strip() if data.get('address') else ""
+                address=data.get('address', '').strip() if data.get('address') else "",
+                manager=mgr_user
             )
+
+            if mgr_user and hasattr(mgr_user, 'profile'):
+                prof = mgr_user.profile
+                prof.center = center
+                user_roles = prof.get_roles()
+                if 'CENTER_MANAGER' not in user_roles:
+                    user_roles.append('CENTER_MANAGER')
+                    prof.roles = user_roles
+                prof.save(using=db_name)
             created_data = get_centers_summary_data(Center.objects.using(db_name).filter(id=center.id), db_name)
             return JsonResponse({
                 "status": "success",
@@ -512,6 +532,29 @@ def center_detail_view(request, pk):
                 center.address = data['address'].strip() if data['address'] else ""
             if 'is_active' in data:
                 center.is_active = bool(data['is_active'])
+
+            if 'manager_id' in data:
+                mgr_id = data.get('manager_id')
+                if mgr_id:
+                    from django.contrib.auth import get_user_model
+                    User = get_user_model()
+                    try:
+                        mgr_user = User.objects.using(db_name).get(id=mgr_id)
+                        center.manager = mgr_user
+                        # ربط ملف المستخدم بالمركز وتعيين دوره كمدير مركز
+                        if hasattr(mgr_user, 'profile'):
+                            prof = mgr_user.profile
+                            prof.center = center
+                            user_roles = prof.get_roles()
+                            if 'CENTER_MANAGER' not in user_roles:
+                                user_roles.append('CENTER_MANAGER')
+                                prof.roles = user_roles
+                            prof.save(using=db_name)
+                    except User.DoesNotExist:
+                        return JsonResponse({"status": "error", "message": "المستخدم المحدد غير موجود"}, status=404)
+                else:
+                    center.manager = None
+
             center.save(using=db_name)
 
             updated_list = get_centers_summary_data(Center.objects.using(db_name).filter(id=center.id), db_name)

@@ -4,6 +4,7 @@ class TenantRouter:
     """
     # قائمة بأسماء تطبيقات قالب المسجد
     tenant_apps = [
+        'admin',
         'users',
         'centers_and_projects',
         'halaqat',
@@ -28,4 +29,4 @@ class TenantRouter:
                 return False
             # السماح بترحيل تطبيقات النظام المركزي
             return True
-        return None
+        return None

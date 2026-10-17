@@ -1,7 +1,7 @@
 # ==========================================
 # المرحلة 1: تجميع عجلات بايثون والمكتبات
 # ==========================================
-FROM python:3.11-slim-bullseye AS builder
+FROM python:3.11-slim-bookworm AS builder
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,12 +14,13 @@ RUN apt-get update && \
 
 RUN pip install --upgrade pip
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /usr/src/app/wheels -r requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
+
 
 # ==========================================
 # المرحلة 2: صورة التشغيل النهائية والمؤمنة
 # ==========================================
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim-bookworm
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -50,7 +51,7 @@ RUN mkdir -p /app/staticfiles /app/media /app/private_media && \
     chown -R django:django /app /entrypoint.prod.sh
 
 # التحويل إلى المستخدم الآمن
-USER django
+#USER django
 
 ENTRYPOINT ["/entrypoint.prod.sh"]
 

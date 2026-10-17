@@ -1,12 +1,17 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { ClipboardText, Mosque, SignOut } from '@phosphor-icons/react';
 import { usePlatformAuth } from '../../context/PlatformAuthContext';
+import useDeviceType from '../../hooks/useDeviceType';
+import MobilePlatformLayout from '../mobile/platform/MobilePlatformLayout';
 import './platform.css';
 
 const PlatformLayout = () => {
     const { admin, logout } = usePlatformAuth();
     const navigate = useNavigate();
-
+    const { isMobile } = useDeviceType();
+    if (isMobile) {
+        return <MobilePlatformLayout />;
+    }
     const doLogout = async () => {
         await logout();
         navigate('/platform/login', { replace: true });

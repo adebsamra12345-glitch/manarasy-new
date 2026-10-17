@@ -4,8 +4,9 @@ from django.db import migrations, models
 
 
 def sanitize_stock_quantity(apps, schema_editor):
+    db_alias = schema_editor.connection.alias
     Reward = apps.get_model('points_and_rewards', 'Reward')
-    Reward.objects.filter(stock_quantity__lt=0).update(stock_quantity=0)
+    Reward.objects.using(db_alias).filter(stock_quantity__lt=0).update(stock_quantity=0)
 
 def reverse_sanitize_stock_quantity(apps, schema_editor):
     pass

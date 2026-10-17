@@ -9,7 +9,7 @@ import shamCashQrCode from '@/assets/images/sham-cash-qr.png';
 import './ShamCashPayment.css';
 
 // ↓↓↓ ضع رقم حساب شام كاش الحقيقي هنا ↓↓↓
-export const SHAM_CASH_ACCOUNT_NUMBER = 'ENTER_SHAM_CASH_NUMBER_HERE';
+export const SHAM_CASH_ACCOUNT_NUMBER = '4016381422493851';
 
 const isPlaceholderAccount = SHAM_CASH_ACCOUNT_NUMBER.startsWith('ENTER_');
 

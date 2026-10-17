@@ -13,10 +13,14 @@ import {
 } from '../../../services/api/tenantService';
 import useDeviceType from '../../../hooks/useDeviceType';
 import MobileCentersManagement from '../../mobile/tenantAdmin/MobileCentersManagement';
+import { getUsers } from '../../../services/api/userService';
 
 const CentersManagementDesktop = () => {
     // Current User formatting
     const userStr = localStorage.getItem('user');
+    const [managersList, setManagersList] = useState([]);
+    const [centerManagerId, setCenterManagerId] = useState('');
+
     let userObj = null;
     try { userObj = JSON.parse(userStr); } catch (e) { }
     const currentUserName = (userObj?.first_name || userObj?.last_name)
@@ -62,27 +66,35 @@ const CentersManagementDesktop = () => {
     const [detailsLoading, setDetailsLoading] = useState(false);
     const [activeDetailTab, setActiveDetailTab] = useState('overview');
 
-    useEffect(() => {
-        fetchData();
-    }, []);
-
     const fetchData = async () => {
         setLoading(true);
         setError(null);
         try {
-            const centersRes = await getCentersList().catch(() => ({ status: 'error', data: [] }));
+            const [centersRes, usersRes] = await Promise.all([
+                getCentersList().catch(() => ({ status: 'error', data: [] })),
+                getUsers().catch(() => ({ status: 'error', data: [] }))
+            ]);
+
             if (centersRes && centersRes.data) {
                 setCenters(centersRes.data);
             } else {
                 setCenters([]);
             }
+
+            if (usersRes && usersRes.data) {
+                setManagersList(usersRes.data);
+            }
         } catch (err) {
             console.error('Error fetching centers data:', err);
-            setError('حدث خطأ أثناء تحميل بيانات المراكز. يرجى المحاولة لاحقاً.');
+            setError('حدث خطأ أثناء تحميل بيانات المراكز.');
         } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        fetchData();
+    }, []);
 
     const showToast = (msg) => {
         setToastMessage(msg);
@@ -96,6 +108,7 @@ const CentersManagementDesktop = () => {
         setCenterCode('');
         setCenterIsActive(true);
         setIsModalOpen(true);
+        setCenterManagerId('');
     };
 
     const handleOpenEditModal = (center) => {
@@ -105,6 +118,7 @@ const CentersManagementDesktop = () => {
         setCenterCode(center.code || '');
         setCenterIsActive(center.is_active !== undefined ? center.is_active : true);
         setIsModalOpen(true);
+        setCenterManagerId(center.manager?.id || '');
     };
 
     const handleCloseModal = () => {
@@ -115,6 +129,8 @@ const CentersManagementDesktop = () => {
         setCenterAddress('');
         setCenterCode('');
         setCenterIsActive(true);
+        setCenterManagerId('');
+
     };
 
     const handleSaveCenter = async (e) => {
@@ -129,7 +145,8 @@ const CentersManagementDesktop = () => {
             const payload = {
                 name: centerName.trim(),
                 address: centerAddress.trim(),
-                is_active: centerIsActive
+                is_active: centerIsActive,
+                manager_id: centerManagerId || null
             };
             if (centerCode.trim()) {
                 payload.code = centerCode.trim();
@@ -1356,6 +1373,37 @@ const CentersManagementDesktop = () => {
                                     }}
                                 />
                             </div>
+                            <div style={{ marginBottom: '1.25rem' }}>
+                                <label style={{ display: 'block', fontWeight: 700, fontSize: '0.95rem', color: '#2d3748', marginBottom: '0.5rem' }}>
+                                    مدير المركز
+                                </label>
+                                <select
+                                    value={centerManagerId}
+                                    onChange={(e) => setCenterManagerId(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        background: '#ffffff',
+                                        border: '1px solid #cbd5e0',
+                                        borderRadius: '12px',
+                                        padding: '0.75rem 1rem',
+                                        fontSize: '1rem',
+                                        color: '#1a202c',
+                                        outline: 'none',
+                                        fontFamily: 'inherit'
+                                    }}
+                                >
+                                    <option value="">-- بدون مدير (غير محدد) --</option>
+                                    {managersList.map((u) => {
+                                        const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username;
+                                        return (
+                                            <option key={u.id} value={u.id}>
+                                                {fullName} ({u.username})
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
 
                             <div style={{ marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
                                 <input

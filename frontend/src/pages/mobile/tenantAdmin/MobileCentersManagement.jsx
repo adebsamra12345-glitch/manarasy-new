@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Buildings, MagnifyingGlass, Plus, Pencil, Trash, CaretDown, Check, X, MapPin, Hash, ShieldCheck, User, Users, Books, UserCheck } from '@phosphor-icons/react';
 import { getCentersList, createCenter, updateCenter, deleteCenter, getCenterById } from '../../../services/api/tenantService';
+import { getUsers } from '../../../services/api/userService';
 
 const MobileCentersManagement = () => {
     const [centers, setCenters] = useState([]);
@@ -8,8 +9,9 @@ const MobileCentersManagement = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCenter, setEditingCenter] = useState(null);
-    const [formData, setFormData] = useState({ name: '', address: '', code: '', is_active: true });
-    
+    const [managersList, setManagersList] = useState([]);
+    const [formData, setFormData] = useState({ name: '', address: '', code: '', is_active: true, manager_id: '' });
+
     // Details Modal
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [selectedCenterForDetails, setSelectedCenterForDetails] = useState(null);
@@ -23,12 +25,19 @@ const MobileCentersManagement = () => {
     const fetchCenters = async () => {
         setLoading(true);
         try {
-            const res = await getCentersList();
+            const [res, usersRes] = await Promise.all([
+                getCentersList().catch(() => ({ data: [] })),
+                getUsers().catch(() => ({ data: [] }))
+            ]);
             if (res?.data) setCenters(res.data);
-        } catch (err) {} finally {
+            if (usersRes?.data) setManagersList(usersRes.data);
+        } catch (err) {
+            console.error(err);
+        } finally {
             setLoading(false);
         }
     };
+
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -65,7 +74,7 @@ const MobileCentersManagement = () => {
         try {
             const res = await getCenterById(center.id);
             if (res?.data) setSelectedCenterForDetails(res.data);
-        } catch (err) {} finally {
+        } catch (err) { } finally {
             setDetailsLoading(false);
         }
     };
@@ -83,9 +92,17 @@ const MobileCentersManagement = () => {
                 <h2 style={{ fontSize: '1.4rem', color: '#133315', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Buildings size={24} color="#558b2f" /> المراكز
                 </h2>
-                <button onClick={() => { setEditingCenter(null); setFormData({ name: '', address: '', code: '', is_active: true }); setIsModalOpen(true); }} style={{ background: '#133315', color: '#fff', border: 'none', borderRadius: '10px', padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 'bold' }}>
+                <button
+                    onClick={() => {
+                        setEditingCenter(null);
+                        setFormData({ name: '', address: '', code: '', is_active: true, manager_id: '' });
+                        setIsModalOpen(true);
+                    }}
+                    style={{ background: '#133315', color: '#fff', border: 'none', borderRadius: '10px', padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 'bold' }}
+                >
                     <Plus size={16} /> إضافة
                 </button>
+
             </div>
 
             {/* Summary Cards */}
@@ -145,18 +162,39 @@ const MobileCentersManagement = () => {
                         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', color: '#333', fontSize: '0.9rem' }}>اسم المركز</label>
-                                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                <input required type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
                             </div>
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', color: '#333', fontSize: '0.9rem' }}>العنوان</label>
-                                <input type="text" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                <input type="text" value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
                             </div>
                             <div>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', color: '#333', fontSize: '0.9rem' }}>كود المركز (اختياري)</label>
-                                <input type="text" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
+                                <input type="text" value={formData.code} onChange={e => setFormData({ ...formData, code: e.target.value })} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd' }} />
                             </div>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#333', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                    مدير المركز
+                                </label>
+                                <select
+                                    value={formData.manager_id}
+                                    onChange={e => setFormData({ ...formData, manager_id: e.target.value })}
+                                    style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid #ddd', background: '#fff', fontFamily: 'inherit', fontSize: '0.9rem' }}
+                                >
+                                    <option value="">-- بدون مدير (غير محدد) --</option>
+                                    {managersList.map(u => {
+                                        const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username;
+                                        return (
+                                            <option key={u.id} value={u.id}>
+                                                {fullName} ({u.username})
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-                                <input type="checkbox" checked={formData.is_active} onChange={e => setFormData({...formData, is_active: e.target.checked})} id="is_active_chk" />
+                                <input type="checkbox" checked={formData.is_active} onChange={e => setFormData({ ...formData, is_active: e.target.checked })} id="is_active_chk" />
                                 <label htmlFor="is_active_chk" style={{ color: '#333' }}>المركز مفعل</label>
                             </div>
                             <button type="submit" style={{ background: '#558b2f', color: '#fff', padding: '1rem', borderRadius: '10px', border: 'none', fontWeight: 'bold', marginTop: '1rem' }}>
@@ -181,10 +219,12 @@ const MobileCentersManagement = () => {
                                     <h2 style={{ margin: 0, color: '#133315' }}>{selectedCenterForDetails.name}</h2>
                                     <div style={{ color: '#666', fontSize: '0.9rem', marginTop: '0.5rem' }}><MapPin size={14} /> {selectedCenterForDetails.address}</div>
                                 </div>
-                                
+
                                 <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
                                     <button onClick={() => setActiveDetailTab('overview')} style={{ padding: '0.6rem 1rem', borderRadius: '10px', whiteSpace: 'nowrap', fontWeight: 'bold', border: 'none', background: activeDetailTab === 'overview' ? '#133315' : '#eee', color: activeDetailTab === 'overview' ? '#fff' : '#666' }}>نظرة عامة</button>
-                                    <button onClick={() => setActiveDetailTab('managers')} style={{ padding: '0.6rem 1rem', borderRadius: '10px', whiteSpace: 'nowrap', fontWeight: 'bold', border: 'none', background: activeDetailTab === 'managers' ? '#133315' : '#eee', color: activeDetailTab === 'managers' ? '#fff' : '#666' }}>المدراء ({selectedCenterForDetails.managers?.length || 0})</button>
+                                    <button onClick={() => setActiveDetailTab('managers')} style={{ padding: '0.6rem 1rem', borderRadius: '10px', whiteSpace: 'nowrap', fontWeight: 'bold', border: 'none', background: activeDetailTab === 'managers' ? '#133315' : '#eee', color: activeDetailTab === 'managers' ? '#fff' : '#666' }}>
+                                        مدير المركز {selectedCenterForDetails.manager ? '(1)' : selectedCenterForDetails.managers?.length ? `(${selectedCenterForDetails.managers.length})` : '(0)'}
+                                    </button>
                                     <button onClick={() => setActiveDetailTab('halaqat')} style={{ padding: '0.6rem 1rem', borderRadius: '10px', whiteSpace: 'nowrap', fontWeight: 'bold', border: 'none', background: activeDetailTab === 'halaqat' ? '#133315' : '#eee', color: activeDetailTab === 'halaqat' ? '#fff' : '#666' }}>الحلقات ({selectedCenterForDetails.halaqat?.length || 0})</button>
                                 </div>
 
@@ -215,13 +255,24 @@ const MobileCentersManagement = () => {
 
                                 {activeDetailTab === 'managers' && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                                        {selectedCenterForDetails.managers?.length > 0 ? selectedCenterForDetails.managers.map(m => (
-                                            <div key={m.id} style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid #eee' }}>
-                                                <div style={{ fontWeight: 'bold', color: '#133315', marginBottom: '0.3rem' }}>{m.name}</div>
-                                                <div style={{ fontSize: '0.85rem', color: '#666' }}>{m.email}</div>
-                                                <div style={{ fontSize: '0.85rem', color: '#666' }}>{m.phone}</div>
+                                        {selectedCenterForDetails.manager ? (
+                                            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid #eee' }}>
+                                                <div style={{ fontWeight: 'bold', color: '#133315', marginBottom: '0.3rem' }}>{selectedCenterForDetails.manager.name}</div>
+                                                <div style={{ fontSize: '0.85rem', color: '#666' }}>اسم المستخدم: {selectedCenterForDetails.manager.username}</div>
+                                                {selectedCenterForDetails.manager.email && <div style={{ fontSize: '0.85rem', color: '#666' }}>{selectedCenterForDetails.manager.email}</div>}
+                                                {selectedCenterForDetails.manager.phone && <div style={{ fontSize: '0.85rem', color: '#666' }}>{selectedCenterForDetails.manager.phone}</div>}
                                             </div>
-                                        )) : <div style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>لا يوجد مدراء</div>}
+                                        ) : selectedCenterForDetails.managers?.length > 0 ? (
+                                            selectedCenterForDetails.managers.map(m => (
+                                                <div key={m.id} style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid #eee' }}>
+                                                    <div style={{ fontWeight: 'bold', color: '#133315', marginBottom: '0.3rem' }}>{m.name}</div>
+                                                    <div style={{ fontSize: '0.85rem', color: '#666' }}>{m.email}</div>
+                                                    <div style={{ fontSize: '0.85rem', color: '#666' }}>{m.phone}</div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>لا يوجد مدير معين</div>
+                                        )}
                                     </div>
                                 )}
 
@@ -238,9 +289,24 @@ const MobileCentersManagement = () => {
                                 )}
 
                                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                                    <button onClick={() => { setIsDetailsOpen(false); setEditingCenter(selectedCenterForDetails); setFormData({ name: selectedCenterForDetails.name, address: selectedCenterForDetails.address || '', code: selectedCenterForDetails.code || '', is_active: selectedCenterForDetails.is_active }); setIsModalOpen(true); }} style={{ flex: 1, padding: '0.8rem', background: '#133315', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.4rem' }}>
+                                    <button
+                                        onClick={() => {
+                                            setIsDetailsOpen(false);
+                                            setEditingCenter(selectedCenterForDetails);
+                                            setFormData({
+                                                name: selectedCenterForDetails.name,
+                                                address: selectedCenterForDetails.address || '',
+                                                code: selectedCenterForDetails.code || '',
+                                                is_active: selectedCenterForDetails.is_active,
+                                                manager_id: selectedCenterForDetails.manager?.id || ''
+                                            });
+                                            setIsModalOpen(true);
+                                        }}
+                                        style={{ flex: 1, padding: '0.8rem', background: '#133315', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.4rem' }}
+                                    >
                                         <Pencil size={18} /> تعديل
                                     </button>
+
                                     <button onClick={() => handleDelete(selectedCenterForDetails.id)} style={{ flex: 1, padding: '0.8rem', background: '#ffebee', color: '#d32f2f', border: 'none', borderRadius: '10px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.4rem' }}>
                                         <Trash size={18} /> حذف
                                     </button>
