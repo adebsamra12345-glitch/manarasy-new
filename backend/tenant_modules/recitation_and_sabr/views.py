@@ -140,6 +140,11 @@ def recitation_evaluate_view(request):
             if "إعادة" in grade_input or "اعادة" in grade_input or grade_input.lower() == "repeat":
                 requires_repeat = True
 
+        # القيمة الافتراضية: درجة السلوك الحالية في سجل الحضور أو 10
+        b_score = getattr(att, 'behavior_score', None) if att else None
+        if b_score is None:
+            b_score = 10
+
         # ضبط تقييم السلوك فقط إذا تم إرساله صراحة في بيانات التقييم
         if 'behavior_score' in data and data.get('behavior_score') is not None:
             try:
@@ -315,6 +320,7 @@ def recitation_evaluate_view(request):
         }, status=201)
 
     except Exception as e:
+        traceback.print_exc()
         return JsonResponse({"status": "error", "message": "فشل تسجيل تقييم التسميع"}, status=500)
 
 
