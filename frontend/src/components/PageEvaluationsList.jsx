@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { CaretUp, CaretDown } from '@phosphor-icons/react';
 import { getSurahName } from '../utils/quranData';
+import { resolveGradeColor } from '../utils/gradeColors';
 
 /**
  * Determines color based on color_code or evaluation grade string.
  */
 const getItemColor = (item) => {
-    if (item.color_code) return item.color_code;
+    if (item.color_code) return resolveGradeColor(item.color_code);
     const grade = String(item.grade || '').trim();
     
     // Check percentage numbers if present

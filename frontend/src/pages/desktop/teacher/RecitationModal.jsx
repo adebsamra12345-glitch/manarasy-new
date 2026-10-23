@@ -5,6 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { evaluateRecitation, updateRecitationEvaluation } from '../../../services/api/tenantService';
 import { JUZ_AMMA_SURAHS, getSurahName } from '../../../utils/quranData';
+import { resolveGradeColor } from '../../../utils/gradeColors';
 
 /**
  * RecitationModal
@@ -160,7 +161,7 @@ const RecitationModal = ({
 
     if (!isOpen || !student) return null;
 
-    const grades = evaluationTemplate?.grades || [];
+    const grades = (evaluationTemplate?.grades || []).map(g => ({ ...g, color_code: resolveGradeColor(g.color_code) }));
     const currentPartObj = allProjectParts.find(p => String(p.id) === String(selectedPartId));
 
     // Check if current target is evaluated
@@ -774,7 +775,7 @@ const RecitationModal = ({
                             {currentPageResult && (
                                 <div style={{
                                     display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                                    background: currentPageResult.color_code || '#558b2f',
+                                    background: resolveGradeColor(currentPageResult.color_code),
                                     color: '#fff', padding: '0.45rem 1.2rem',
                                     borderRadius: '20px', fontWeight: 'bold', fontSize: '0.92rem',
                                     marginBottom: '0.8rem'
