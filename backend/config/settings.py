@@ -13,13 +13,15 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 from pathlib import Path
 from django.core.management.utils import get_random_secret_key
-import dotenv
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file
-dotenv.load_dotenv(BASE_DIR / '.env')
+# Load environment variables from .env file if python-dotenv is installed
+try:
+    import dotenv
+    dotenv.load_dotenv(BASE_DIR / '.env')
+except ImportError:
+    pass
 
 # الافتراضات آمنة: الإنتاج هو الوضع الأساسي، والتطوير يتطلب DEBUG=True صراحةً في .env
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
@@ -98,6 +100,7 @@ INSTALLED_APPS = [
     # Platform-level (master DB only): أدمن المنصة + طلبات التسجيل والإيصالات
     'platform_auth',
     'core_system.registrations',
+    'core_system.ai_assistant',
     # Tenant apps (tenant_modules)
     'tenant_modules.users',
     'tenant_modules.centers_and_projects',
@@ -300,3 +303,22 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# =====================================================================
+# إعدادات طبقة الذكاء الاصطناعي (Orchestrator Integration & Feature Flags)
+# التطبيق يتصل بـ Orchestrator حصراً ولا يتصل بـ vLLM مباشرة
+# =====================================================================
+ORCHESTRATOR_BASE_URL = os.getenv('ORCHESTRATOR_BASE_URL', '')
+ORCHESTRATOR_SERVICE_KEY = os.getenv('ORCHESTRATOR_SERVICE_KEY', '')
+ORCHESTRATOR_TIMEOUT_SECONDS = float(os.getenv('ORCHESTRATOR_TIMEOUT_SECONDS', '8.0'))
+
+AI_FEATURE_FLAGS = {
+    'MASTER_ENABLED': os.getenv('AI_FEATURE_MASTER_ENABLED', 'True').lower() in ('true', '1', 't'),
+    'ASSISTANT_CHAT': os.getenv('AI_FEATURE_ASSISTANT_CHAT', 'True').lower() in ('true', '1', 't'),
+    'VOICE_TEXT_AGENT': os.getenv('AI_FEATURE_VOICE_TEXT_AGENT', 'True').lower() in ('true', '1', 't'),
+    'EVALUATION_NOTES': os.getenv('AI_FEATURE_EVALUATION_NOTES', 'True').lower() in ('true', '1', 't'),
+    'REPORT_INSIGHTS': os.getenv('AI_FEATURE_REPORT_INSIGHTS', 'True').lower() in ('true', '1', 't'),
+    'QUIZ_GENERATOR': os.getenv('AI_FEATURE_QUIZ_GENERATOR', 'True').lower() in ('true', '1', 't'),
+    'STT_TRANSCRIPTION': os.getenv('AI_FEATURE_STT_TRANSCRIPTION', 'True').lower() in ('true', '1', 't'),
+}
+

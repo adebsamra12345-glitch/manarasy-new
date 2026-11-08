@@ -19,3 +19,12 @@ backend/dbdump.json
 
 # Claude Code local worktrees/state
 .claude/
+
+# AI Stack: Models, LoRA adapters, training datasets & evaluation reports
+gpu-stack/loras/*
+!gpu-stack/loras/.gitkeep
+gpu-stack/data/*
+!gpu-stack/data/.gitkeep
+*.safetensors
+*.gguf
+.pytest_cache/

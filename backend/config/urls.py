@@ -17,6 +17,7 @@ api_urlpatterns = [
     path('public/', include('core_system.registrations.urls_public')),
     path('platform/auth/', include('platform_auth.urls')),
     path('platform/', include('core_system.registrations.urls_platform')),
+    path('ai/', include('core_system.ai_assistant.urls')),
     
     # tenant_modules (Tenant DB)
     path('users/', include('tenant_modules.users.urls')),

@@ -1,0 +1,64 @@
+# ==========================================
+# بيئة الاستدلال والصوت لمنصة منارة (GPU Node - adebserver)
+# الكرت: NVIDIA RTX 5070 Ti (16GB VRAM)
+# المستخدم من خدمات أخرى: ~6.4GB
+# مخصص لـ vLLM (Qwen3-8B 4-bit): gpu-memory-utilization=0.40 (~6.55GB)
+# الهامش الآمن المتبقي: >= 2.5GB
+# ==========================================
+
+services:
+  llm:
+    image: vllm/vllm-openai:latest
+    container_name: manarasy-vllm
+    runtime: nvidia
+    ipc: host
+    restart: unless-stopped
+    environment:
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    command: >
+      --model /models/Qwen3-8B
+      --served-model-name base
+      --quantization bitsandbytes
+      --load-format bitsandbytes
+      --gpu-memory-utilization 0.40
+      --max-model-len 4096
+      --max-num-seqs 4
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --default-chat-template-kwargs '{"enable_thinking": false}'
+      --enable-lora
+      --max-lora-rank 32
+      ${LORA_ARGS:-}
+    ports:
+      - "${TS_IP:?يجب ضبط TS_IP بعنوان Tailscale حصراً}:8000:8000"
+    volumes:
+      - "${MODELS_DIR:?يجب ضبط مسار النماذج MODELS_DIR}:/models:ro"
+      - "./loras:/loras"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+
+  stt:
+    image: fedirz/faster-whisper-server:latest-cuda
+    container_name: manarasy-stt
+    runtime: nvidia
+    restart: unless-stopped
+    depends_on:
+      llm:
+        condition: service_healthy
+    environment:
+      - WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+      - WHISPER__COMPUTE_TYPE=int8_float16
+      - WHISPER__TTL=-1
+    ports:
+      - "${TS_IP:?يجب ضبط TS_IP بعنوان Tailscale حصراً}:8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\" || curl -sf http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+

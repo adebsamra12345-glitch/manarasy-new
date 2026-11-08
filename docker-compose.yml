@@ -92,6 +92,30 @@ services:
       - "traefik.http.middlewares.manarasy-redirect-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.manarasy-redirect-https.redirectscheme.permanent=true"
 
+  # ==========================================
+  # خدمة وسيط الذكاء الاصطناعي (AI Orchestrator)
+  # داخل الشبكة المعزولة فقط (لا تُعرَّض على 0.0.0.0)
+  # ==========================================
+  manarasy-orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: manarasy-orchestrator
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.prod
+    environment:
+      - AGENT_BACKEND=django
+      - DJANGO_BASE_URL=http://manarasy-backend:8000
+    networks:
+      - manarasy-internal
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 # ==========================================
 # وحدات التخزين المشتركة والمعزولة
 # ==========================================
