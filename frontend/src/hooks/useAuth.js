@@ -1,25 +1,25 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { hasSession, setAccessToken, clearSession } from '../services/tokenStore';
 
 /**
  * useAuth — إدارة حالة المصادقة
  */
 export const useAuth = () => {
-    const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('access_token'));
+    const [isLoggedIn, setIsLoggedIn] = useState(hasSession());
     const [user, setUser] = useState(() => {
         try { return JSON.parse(localStorage.getItem('user') || 'null'); }
         catch { return null; }
     });
 
     const login = (userData, tokens) => {
-        localStorage.setItem('access_token', tokens.access);
-        if (tokens.refresh) localStorage.setItem('refresh_token', tokens.refresh);
+        setAccessToken(tokens.access);
         localStorage.setItem('user', JSON.stringify(userData));
         setUser(userData);
         setIsLoggedIn(true);
     };
 
     const logout = () => {
-        localStorage.clear();
+        clearSession();
         setUser(null);
         setIsLoggedIn(false);
     };

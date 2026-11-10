@@ -1,10 +1,12 @@
 import { createContext, useContext, useState, useMemo } from 'react';
 import { switchActiveRole as switchRoleApi } from '../services/api/userService';
+import { revokeSession } from '../services/sessionRefresh';
+import { hasSession, setAccessToken, clearSession } from '../services/tokenStore';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-    const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('access_token'));
+    const [isLoggedIn, setIsLoggedIn] = useState(hasSession());
     const [user, setUser] = useState(() => {
         try { return JSON.parse(localStorage.getItem('user') || 'null'); }
         catch { return null; }
@@ -32,8 +34,7 @@ export const AuthProvider = ({ children }) => {
     }, [user, role]);
 
     const login = (userData, tokens) => {
-        if (tokens.access) localStorage.setItem('access_token', tokens.access);
-        if (tokens.refresh) localStorage.setItem('refresh_token', tokens.refresh);
+        if (tokens.access) setAccessToken(tokens.access);
         if (tokens.tenant_id) localStorage.setItem('tenant_id', tokens.tenant_id);
 
         const rawRoles = Array.isArray(userData.roles) && userData.roles.length > 0
@@ -75,7 +76,7 @@ export const AuthProvider = ({ children }) => {
                 };
 
                 if (newAccessToken) {
-                    localStorage.setItem('access_token', newAccessToken);
+                    setAccessToken(newAccessToken);
                 }
                 localStorage.setItem('user_role', updatedUserObj.role);
                 localStorage.setItem('user_roles', JSON.stringify(updatedUserObj.roles));
@@ -91,7 +92,8 @@ export const AuthProvider = ({ children }) => {
     };
 
     const logout = () => {
-        localStorage.clear();
+        revokeSession();   // best-effort: إبطال الـ refresh ومسح الكوكي في الخادم
+        clearSession();
         setUser(null);
         setIsLoggedIn(false);
     };

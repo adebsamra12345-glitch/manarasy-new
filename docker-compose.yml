@@ -25,6 +25,24 @@ services:
       start_period: 10s
 
   # ==========================================
+  # Redis (داخلي فقط): عدّادات القفل، إبطال الجلسات، الكاش المشترك بين الـ workers
+  # ==========================================
+  manarasy-redis:
+    image: redis:7-alpine
+    container_name: manarasy-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - manarasy-internal
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ==========================================
   # خادم التطبيق الخلفي (Django / DRF)
   # ==========================================
   manarasy-backend:
@@ -35,6 +53,15 @@ services:
     restart: unless-stopped
     env_file:
       - ./backend/.env.prod
+    environment:
+      REDIS_URL: redis://manarasy-redis:6379/1
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 768M
     volumes:
       - manarasy_static:/app/staticfiles
       - manarasy_media:/app/media
@@ -45,6 +72,8 @@ services:
       - proxy
     depends_on:
       manarasy-db:
+        condition: service_healthy
+      manarasy-redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
@@ -60,6 +89,16 @@ services:
       - "traefik.http.routers.manarasy-api.tls.certresolver=myresolver"
       - "traefik.http.services.manarasy-api.loadbalancer.server.port=8000"
       - "traefik.http.routers.manarasy-api.priority=100"
+      - "traefik.http.routers.manarasy-api.middlewares=manarasy-api-ratelimit,manarasy-api-inflight,manarasy-sec-headers"
+      - "traefik.http.middlewares.manarasy-api-ratelimit.ratelimit.average=50"
+      - "traefik.http.middlewares.manarasy-api-ratelimit.ratelimit.burst=100"
+      - "traefik.http.middlewares.manarasy-api-ratelimit.ratelimit.period=1s"
+      - "traefik.http.middlewares.manarasy-api-inflight.inflightreq.amount=100"
+      - "traefik.http.middlewares.manarasy-sec-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.manarasy-sec-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.manarasy-sec-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.manarasy-sec-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.manarasy-sec-headers.headers.referrerPolicy=same-origin"
       - "traefik.docker.network=proxy"
 
   # ==========================================
@@ -71,6 +110,8 @@ services:
       dockerfile: Dockerfile.prod
     container_name: manarasy-frontend
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - manarasy_static:/usr/share/nginx/static:ro
       - manarasy_media:/usr/share/nginx/media:ro
@@ -83,6 +124,9 @@ services:
       # توجيه النطاق الرئيسي والنطاقات الفرعية للمساجد (*.manarasy.io)
       - "traefik.http.routers.manarasy-web.rule=Host(`manarasy.io`, `www.manarasy.io`) || HostRegexp(`{subdomain:[a-z0-9-]+}.manarasy.io`)"
       - "traefik.http.routers.manarasy-web.entrypoints=websecure"
+      - "traefik.http.routers.manarasy-web.middlewares=manarasy-web-ratelimit"
+      - "traefik.http.middlewares.manarasy-web-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.manarasy-web-ratelimit.ratelimit.burst=200"
       - "traefik.http.routers.manarasy-web.tls.certresolver=myresolver"
       - "traefik.http.services.manarasy-web.loadbalancer.server.port=80"
       # إعادة توجيه HTTP إلى HTTPS تلقائياً

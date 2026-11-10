@@ -1,4 +1,5 @@
 import json
+import logging
 import traceback
 import jwt
 from datetime import datetime
@@ -786,7 +787,14 @@ def user_impersonate_view(request, pk):
 
     user_roles = target_profile.get_roles()
     jwt_secret = getattr(settings, 'JWT_SECRET_KEY', settings.SECRET_KEY)
-    access_lifetime = getattr(settings, 'JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60)
+    # توكن الانتحال قصير العمر (حد أقصى 15 دقيقة)
+    access_lifetime = min(int(getattr(settings, 'JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60)), 15)
+    # سجل تدقيق: من انتحل من، ومتى، ومن أي IP
+    logging.getLogger('security.audit').warning(
+        "IMPERSONATION tenant=%s by=%s target=%s target_role=%s ip=%s",
+        tenant.subdomain, requester_username, target_user.username, target_profile.role,
+        request.META.get('REMOTE_ADDR'),
+    )
     now = datetime.utcnow()
     payload = {
         "tenant_id": str(tenant.id),

@@ -56,4 +56,4 @@ RUN mkdir -p /app/staticfiles /app/media /app/private_media && \
 ENTRYPOINT ["/entrypoint.prod.sh"]
 
 # التشغيل الموحد عبر Gunicorn مع تطبيق WSGI الصحيح
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--threads", "2", "--timeout", "180", "config.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--threads", "2", "--timeout", "120", "--graceful-timeout", "30", "--keep-alive", "5", "--max-requests", "1000", "--max-requests-jitter", "100", "--limit-request-line", "4094", "--limit-request-fields", "50", "--worker-tmp-dir", "/dev/shm", "config.wsgi:application"]

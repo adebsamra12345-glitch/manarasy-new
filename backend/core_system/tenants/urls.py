@@ -12,10 +12,13 @@ from .dashboard_views import (
 )
 
 from .settings_views import tenant_settings_view, tenant_branding_view
+from .session_views import tenant_refresh_view, tenant_logout_view
 
 urlpatterns = [
     path('', tenant_list_create_view, name='tenant_list_create'),
     path('login/', tenant_login_view, name='tenant_login'),
+    path('refresh/', tenant_refresh_view, name='tenant_refresh'),
+    path('logout/', tenant_logout_view, name='tenant_logout'),
     path('settings/', tenant_settings_view, name='tenant_settings'),
     path('branding/', tenant_branding_view, name='tenant_branding'),
     path('<uuid:pk>/', tenant_detail_view, name='tenant_detail'),

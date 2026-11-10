@@ -31,6 +31,17 @@ if not SECRET_KEY:
         SECRET_KEY = 'django-insecure-dev-only-key'
     else:
         SECRET_KEY = get_random_secret_key()
+        # مفتاح عشوائي لكل إقلاع يُبطل كل التوكنات عند إعادة التشغيل أو مع عدة workers
+        import warnings
+        warnings.warn("SECRET_KEY is not set: using a random per-process key. Set SECRET_KEY in the environment.")
+
+# وضع صارم اختياري: STRICT_SECRETS=True يفشل الإقلاع إن لم تُضبط الأسرار في الإنتاج
+STRICT_SECRETS = os.getenv('STRICT_SECRETS', 'False').lower() in ('true', '1', 't')
+if STRICT_SECRETS and not DEBUG:
+    from django.core.exceptions import ImproperlyConfigured
+    _missing = [k for k in ('SECRET_KEY', 'JWT_SECRET_KEY', 'PLATFORM_JWT_SECRET') if not os.getenv(k)]
+    if _missing:
+        raise ImproperlyConfigured("Missing required secrets in production: " + ", ".join(_missing))
 
 # ALLOWED_HOSTS configuration
 ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS')
@@ -58,10 +69,21 @@ if not CORS_ALLOWED_ORIGINS:
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://([a-zA-Z0-9-]+\.)?manarasy\.io$",
     r"^https://([a-zA-Z0-9-]+\.)?manarasy\.com$",
-    r"^http://([a-zA-Z0-9-]+\.)?localhost(:[0-9]+)?$",
-    r"^http://127\.0\.0\.1(:[0-9]+)?$",
 ]
+if DEBUG:
+    # أصول التطوير المحلي فقط خارج الإنتاج
+    CORS_ALLOWED_ORIGIN_REGEXES += [
+        r"^http://([a-zA-Z0-9-]+\.)?localhost(:[0-9]+)?$",
+        r"^http://127\.0\.0\.1(:[0-9]+)?$",
+    ]
+else:
+    # لا أصول محلية مع credentials في الإنتاج (إلا إن حُدّدت صراحةً عبر CORS_ALLOWED_ORIGINS)
+    if not os.getenv('CORS_ALLOWED_ORIGINS'):
+        CORS_ALLOWED_ORIGINS = []
 CORS_ALLOW_CREDENTIALS = True
+if not DEBUG and CORS_ALLOW_ALL_ORIGINS:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("CORS_ALLOW_ALL_ORIGINS must be False in production (credentials are enabled)")
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -266,7 +288,8 @@ PLATFORM_LOGIN_MAX_FAILURES = 5
 PLATFORM_LOGIN_LOCK_MINUTES = 15
 
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
-JWT_ACCESS_TOKEN_LIFETIME_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', '60'))
+# قُصِّر من 60 إلى 30 دقيقة: التجديد الصامت عبر /api/tenants/refresh/ يغطي الاستمرارية
+JWT_ACCESS_TOKEN_LIFETIME_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', '30'))
 JWT_REFRESH_TOKEN_LIFETIME_DAYS = int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME_DAYS', '7'))
 
 # إنشاء قاعدة المسجد: متزامن افتراضياً. اضبط PROVISIONING_ASYNC=true بعد تشغيل Celery + Redis
@@ -300,3 +323,26 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# تجزئة كلمات المرور: Argon2 للجديد، وPBKDF2 يبقى للتحقق من الكلمات القديمة وتُرقّى تلقائياً عند الدخول
+try:
+    import argon2  # noqa: F401
+    PASSWORD_HASHERS = [
+        'django.contrib.auth.hashers.Argon2PasswordHasher',
+        'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+        'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    ]
+except ImportError:  # argon2-cffi غير مثبت: نبقى على الافتراضي
+    pass
+
+# ترويسات إضافية على الـ API
+SECURE_REFERRER_POLICY = 'same-origin'
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict'
+CSRF_COOKIE_SAMESITE = 'Strict'
+
+# عدّادات القفل والإبطال تحتاج ذاكرة مشتركة بين الـ workers
+if not DEBUG and not REDIS_URL:
+    import warnings
+    warnings.warn('REDIS_URL is not set: login lockout / throttles / session revocation are per-worker only.')

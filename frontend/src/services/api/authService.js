@@ -1,4 +1,6 @@
 ﻿import apiClient from './apiClient';
+import { refreshAccessToken, revokeSession } from '../sessionRefresh';
+import { clearSession } from '../tokenStore';
 
 /** تسجيل الدخول */
 export const login = async ({ subdomain, username, password }) => {
@@ -7,8 +9,9 @@ export const login = async ({ subdomain, username, password }) => {
 };
 
 /** تسجيل الخروج (محلي) */
-export const logout = () => {
-    localStorage.clear();
+export const logout = async () => {
+    await revokeSession();   // يُبطل الـ refresh ويمسح الكوكي في الخادم
+    clearSession();
     window.location.href = '/login';
 };
 
@@ -19,9 +22,4 @@ export const verifyToken = async () => {
 };
 
 /** تحديث التوكن */
-export const refreshToken = async () => {
-    const refresh = localStorage.getItem('refresh_token');
-    const response = await apiClient.post('/api/token/refresh/', { refresh });
-    localStorage.setItem('access_token', response.data.access);
-    return response.data;
-};
+export const refreshToken = () => refreshAccessToken();

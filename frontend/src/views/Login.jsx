@@ -3,6 +3,7 @@ import { Eye, EyeSlash, User, Lock, Sparkle } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { login } from '../services/api';
 import { FEATURES } from '../config/features';
+import { setAccessToken } from '../services/tokenStore';
 
 const Login = ({ onLoginSuccess }) => {
     const navigate = useNavigate();
@@ -57,7 +58,7 @@ const Login = ({ onLoginSuccess }) => {
                     tenant_id: data.data.tenant.id,
                     tenant_name: data.data.tenant.name,
                 };
-                localStorage.setItem('access_token', data.data.access_token);
+                setAccessToken(data.data.access_token);
                 localStorage.setItem('tenant_id', data.data.tenant.id);
                 localStorage.setItem('tenant_name', data.data.tenant.name);
                 localStorage.setItem('user_role', data.data.user.role);

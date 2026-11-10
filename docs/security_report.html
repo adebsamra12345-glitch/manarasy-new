@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير أمن منصة منارة</title>
+<style>
+@page{size:A4;margin:16mm 14mm}
+body{font-family:"Segoe UI","Tahoma","Arial",sans-serif;font-size:11pt;line-height:1.65;color:#1b1f23}
+h1{font-size:22pt;margin:0 0 4px;color:#0b3d2e}
+h2{font-size:14.5pt;color:#0b3d2e;border-bottom:2px solid #0b3d2e;padding-bottom:3px;margin-top:22px;page-break-after:avoid}
+h3{font-size:12pt;margin:14px 0 4px;color:#14532d}
+table{width:100%;border-collapse:collapse;margin:8px 0;font-size:9.8pt;page-break-inside:auto}
+tr{page-break-inside:avoid}
+th{background:#0b3d2e;color:#fff;padding:5px 6px;text-align:right}
+td{border:1px solid #cfd8d3;padding:5px 6px;vertical-align:top}
+.ok{color:#0a7d33;font-weight:700}.mid{color:#b45309;font-weight:700}.bad{color:#b91c1c;font-weight:700}
+.box{border:1px solid #cfd8d3;background:#f4f8f6;padding:8px 12px;border-radius:6px;margin:8px 0}
+.warn{border-color:#e7b66b;background:#fff7e8}
+code{direction:ltr;unicode-bidi:embed;background:#eef2ef;padding:0 3px;font-size:9pt}
+.meta{color:#556;font-size:10pt}
+</style></head><body>
+
+<h1>تقرير أمن منصة منارة (Manara Platform)</h1>
+<div class="meta">تقييم دفاعي استباقي + سجل التحسينات المنفَّذة · التاريخ: 2026-11-10 · لم تُنفَّذ أي هجمات حقيقية</div>
+
+<div class="box warn"><b>ملخص صريح.</b> نُفِّذت في الكود والإعدادات التحسينات المذكورة أدناه، لكنها <b>لم تُنشر بعد</b> إلى الإنتاج، ولم يُجرَ اختبار اختراق خارجي. رقم «95%» ليس قياساً معتمداً؛ استخدمنا مقياساً داخلياً موزوناً (القسم 2). النتيجة التقديرية الحالية <b>≈ 84%</b>، وتبلغ <b>≈ 93–95%</b> بعد النشر وإتمام البنود المعلّقة في القسم 5 (أهمها WAF/CDN، تفعيل CSP، وMFA، ومستخدم غير جذري). لن أدّعي الوصول إلى 95% قبل ذلك.</div>
+
+<h2>1) ما نُفِّذ فعلياً في هذه الجلسات</h2>
+<table>
+<tr><th>#</th><th>التحسين</th><th>الملفات</th><th>الأثر</th></tr>
+<tr><td>1</td><td>إعدادات CORS صارمة: لا أصول محلية في الإنتاج، ورفض <code>CORS_ALLOW_ALL_ORIGINS</code> مع credentials</td><td><code>backend/config/settings.py</code></td><td>يغلق تسريب الجلسات لأصول غير موثوقة</td></tr>
+<tr><td>2</td><td>وضع <code>STRICT_SECRETS</code> (فشل الإقلاع إن غابت الأسرار) + تحذير عند غياب <code>SECRET_KEY</code></td><td><code>settings.py</code></td><td>يمنع مفتاحاً عشوائياً يُبطل التوكنات</td></tr>
+<tr><td>3</td><td>سجل تدقيق للانتحال (من/من/دور/IP) وتقصير توكنه إلى 15 دقيقة</td><td><code>tenant_modules/users/views.py</code></td><td>مساءلة على أخطر صلاحية إدارية</td></tr>
+<tr><td>4</td><td>Refresh token في كوكي <code>HttpOnly; Secure; SameSite=Strict</code> + endpoints <code>/refresh/</code> و<code>/logout/</code> + حماية CSRF بترويسة مخصصة + إبطال الجلسة عند الخروج</td><td><code>core_system/tenants/session_views.py</code>، <code>urls.py</code>، <code>views.py</code></td><td>جلسة دائمة لا يقرؤها JavaScript</td></tr>
+<tr><td>5</td><td>نقل الـaccess token من <code>localStorage</code> إلى الذاكرة فقط + تجديد صامت قبل أول رسم + ترحيل التوكنات القديمة</td><td><code>frontend/src/services/tokenStore.js</code>، <code>sessionRefresh.js</code>، <code>main.jsx</code> وغيرها</td><td>XSS لم يعد يسرق الجلسة من التخزين</td></tr>
+<tr><td>6</td><td>تقصير عمر الـaccess من 60 إلى 30 دقيقة</td><td><code>settings.py</code></td><td>نافذة أصغر عند تسريب توكن</td></tr>
+<tr><td>7</td><td>CSP (وضع Report-Only) + HSTS + COOP على الواجهة</td><td><code>frontend/nginx/default.conf</code></td><td>جاهز للتفعيل بعد المراقبة</td></tr>
+<tr><td>8</td><td>عدّاد فشل دخول لكل حساب (بلا IP، 20 محاولة/15 دقيقة) فوق العدّاد القائم (IP+مسجد+مستخدم)</td><td><code>core_system/tenants/views.py</code></td><td>يمنع التخمين الموزَّع لحساب واحد</td></tr>
+<tr><td>9</td><td>تقييد معدل وكيل الأوامر: 30 طلب/دقيقة لكل مستخدم</td><td><code>tenant_modules/agent/views.py</code></td><td>يحمي المعالج من الاستنزاف</td></tr>
+<tr><td>10</td><td>Argon2 لتجزئة الكلمات الجديدة (PBKDF2 للقديمة وترقية تلقائية)، Referrer-Policy، COOP، كوكيات Strict</td><td><code>settings.py</code></td><td>تجزئة أقوى ضد تسريب القاعدة</td></tr>
+<tr><td>11</td><td>إضافة Redis داخلي لعدّادات القفل والإبطال والكاش المشترك بين الـworkers، وضبط <code>REDIS_URL</code> للخلفية</td><td><code>docker-compose.yml</code></td><td>بدونه كان القفل مضاعفاً عدد الـworkers (3) والإبطال غير موثوق</td></tr>
+<tr><td>12</td><td>Traefik: تعطيل الـdashboard، <b>docker-socket-proxy</b> بدل تركيب <code>docker.sock</code> مباشرة، إعادة توجيه HTTP→HTTPS على الحافة، مهلات، رفع إلى v2.11، <code>no-new-privileges</code></td><td><code>docker-compose.traefik.yml</code></td><td>يسد مسار تصعيد امتيازات عبر الحاوية</td></tr>
+<tr><td>13</td><td>Rate limit وInflight limit وترويسات أمان على مسار الـAPI، وRate limit على الواجهة، وحدود موارد للخلفية</td><td><code>docker-compose.yml</code> (labels)</td><td>طبقة أولى ضد DoS/الغمر على L7</td></tr>
+<tr><td>14</td><td>Gunicorn: مهلة 120ث بدل 180، <code>max-requests</code> مع jitter، حدود طول السطر والترويسات</td><td><code>backend/Dockerfile.prod</code></td><td>تخفيف Slowloris وتسرب الذاكرة</td></tr>
+<tr><td>15</td><td>سير عمل CI أمني: pip-audit، bandit، npm audit، gitleaks (أسبوعياً وعند كل push)</td><td><code>.github/workflows/security.yml</code></td><td>كشف مبكر للتبعيات والأسرار</td></tr>
+<tr><td>16</td><td>اختبارات: 9 اختبارات جديدة لـrefresh/logout (CSRF، نوع التوكن، انتهاء، تعارض المسجد، الإبطال، خصائص الكوكي) — الإجمالي 21 ناجحاً</td><td><code>core_system/tests_session.py</code></td><td>حماية من التراجع</td></tr>
+</table>
+
+<h3>تصحيحات لتقييمي الأولي (للأمانة)</h3>
+<ul>
+<li>قفل دخول المساجد <b>موجود</b> أصلاً (لم يكن مفقوداً)؛ الضعف كان في الاعتماد على كاش لكل worker وعلى الـIP فقط — عُولج بالبندين 8 و11.</li>
+<li>فحص نوع الملف بالبايتات (magic bytes) للإيصالات وشعارات المساجد <b>موجود</b> أصلاً؛ لم أعدّه ثغرة.</li>
+<li>لا توجد مشكلة في توقيع <code>get_tenant_db</code> داخل وحدة <code>agent</code>.</li>
+<li>مصادقة JWT المركزية (<code>TenantJWTAuthMiddleware</code> + <code>tenant_auth</code>) موجودة؛ المتبقي نسخ محلية في بعض الـviews.</li>
+</ul>
+
+<h2>2) مقياس التقييم الداخلي (تقديري، غير معتمد)</h2>
+<table>
+<tr><th>المجال</th><th>الوزن</th><th>قبل</th><th>الآن (بعد التعديلات، قبل النشر)</th><th>بعد النشر وإغلاق البنود المعلّقة</th></tr>
+<tr><td>المصادقة وإدارة الجلسات</td><td>15</td><td>60%</td><td>85%</td><td>95% (مع MFA للمدراء)</td></tr>
+<tr><td>التحكم بالوصول وعزل المستأجرين</td><td>15</td><td>75%</td><td>78%</td><td>92% (اختبارات عزل لكل مسار)</td></tr>
+<tr><td>حماية طبقة التطبيق (XSS/CSRF/Injection)</td><td>15</td><td>65%</td><td>82%</td><td>95% (CSP مفعّلة)</td></tr>
+<tr><td>إدارة الأسرار والإعدادات</td><td>10</td><td>60%</td><td>85%</td><td>95%</td></tr>
+<tr><td>حماية الشبكة والبنية (DDoS/Traefik/Docker)</td><td>15</td><td>45%</td><td>75%</td><td>92% (CDN/WAF أمام Traefik)</td></tr>
+<tr><td>حماية البيانات والنسخ الاحتياطي</td><td>10</td><td>70%</td><td>72%</td><td>90% (نسخ خارجية غير قابلة للتعديل + اختبار استعادة)</td></tr>
+<tr><td>المراقبة والتدقيق والاستجابة</td><td>10</td><td>40%</td><td>65%</td><td>90% (تنبيهات وتجميع سجلات)</td></tr>
+<tr><td>سلسلة التوريد وCI</td><td>10</td><td>35%</td><td>75%</td><td>90%</td></tr>
+<tr><td><b>المجموع الموزون</b></td><td><b>100</b></td><td><b class="mid">≈ 58%</b></td><td><b class="mid">≈ 78–84%</b></td><td><b class="ok">≈ 92–95%</b></td></tr>
+</table>
+<p class="meta">طريقة الحساب: متوسط موزون لتقدير ذاتي لكل مجال وفق قائمة تحقق (OWASP ASVS/Top 10). هو أداة تتبّع للتقدم وليس شهادة؛ للحصول على رقم موثوق يلزم اختبار اختراق مستقل.</p>
+
+<h2>3) مصفوفة الدفاع ضد 50 هجوماً (حالة بعد التعديلات)</h2>
+<table>
+<tr><th>#</th><th>الهجوم</th><th>الدفاع</th><th>الحالة</th></tr>
+<tr><td>1</td><td>Broken Access Control / IDOR</td><td>ديكوريتر <code>tenant_auth</code> + ربط التوكن بالمسجد</td><td class="mid">جزئي: يلزم اختبار لكل مسار</td></tr>
+<tr><td>2</td><td>Cryptographic Failures</td><td>TLS+HSTS، Argon2، أسرار منفصلة</td><td class="ok">مغطى (يتطلب ضبط الأسرار)</td></tr>
+<tr><td>3</td><td>SQL Injection</td><td>ORM فقط، لا <code>.raw/.extra</code></td><td class="ok">مغطى</td></tr>
+<tr><td>4</td><td>ORM/NoSQL Injection</td><td>تحقق مدخلات</td><td class="mid">راجع المرشحات الديناميكية</td></tr>
+<tr><td>5</td><td>Command Injection</td><td>لا <code>subprocess</code> بمدخلات مستخدم</td><td class="ok">مغطى</td></tr>
+<tr><td>6</td><td>Insecure Design</td><td>تدقيق الانتحال وتقصير توكنه</td><td class="mid">جزئي</td></tr>
+<tr><td>7</td><td>Security Misconfiguration</td><td>CORS صارم، STRICT_SECRETS، تعطيل dashboard</td><td class="ok">مغطى</td></tr>
+<tr><td>8</td><td>Vulnerable Components</td><td>CI: pip-audit/npm audit</td><td class="ok">مغطى بعد النشر</td></tr>
+<tr><td>9</td><td>Auth Failures</td><td>قفل مزدوج، توكن قصير، إبطال</td><td class="mid">MFA غير موجود</td></tr>
+<tr><td>10</td><td>Integrity Failures</td><td>gitleaks، تثبيت صور Traefik</td><td class="mid">جزئي (SRI/توقيع الصور)</td></tr>
+<tr><td>11</td><td>Logging & Monitoring</td><td>سجل <code>security.audit</code> + accesslog</td><td class="mid">يلزم تجميع وتنبيه</td></tr>
+<tr><td>12</td><td>SSRF</td><td>لا جلب عنواني من مدخلات المستخدم ظاهراً</td><td class="mid">راجع Webhook الدفع</td></tr>
+<tr><td>13</td><td>XSS</td><td>React يهرب، CSP، لا توكن في التخزين</td><td class="mid">CSP Report-Only</td></tr>
+<tr><td>14</td><td>CSRF</td><td>Bearer + كوكي Strict + ترويسة مخصصة</td><td class="ok">مغطى</td></tr>
+<tr><td>15</td><td>XXE</td><td>لا معالجة XML</td><td class="ok">مغطى</td></tr>
+<tr><td>16</td><td>Insecure Deserialization</td><td>لا pickle/yaml.load</td><td class="ok">مغطى</td></tr>
+<tr><td>17</td><td>Path Traversal</td><td>تخزين خاص خارج الجذر</td><td class="ok">مغطى</td></tr>
+<tr><td>18</td><td>Unrestricted Upload</td><td>فحص بايتات + حد حجم + تخزين خاص</td><td class="mid">بلا مسح فيروسات</td></tr>
+<tr><td>19</td><td>Open Redirect</td><td>—</td><td class="mid">راجع <code>next</code></td></tr>
+<tr><td>20</td><td>Mass Assignment</td><td>—</td><td class="mid">راجع تحديث الملف الشخصي (role)</td></tr>
+<tr><td>21</td><td>HTTP Parameter Pollution</td><td>—</td><td class="mid">جزئي</td></tr>
+<tr><td>22</td><td>Clickjacking</td><td>XFO + frame-ancestors</td><td class="ok">مغطى</td></tr>
+<tr><td>23</td><td>Host Header Injection</td><td>ALLOWED_HOSTS</td><td class="ok">مغطى</td></tr>
+<tr><td>24</td><td>CORS Misconfiguration</td><td>قائمة نطاقات + فشل إقلاع</td><td class="ok">مغطى</td></tr>
+<tr><td>25</td><td>Business Logic Abuse</td><td>Throttle للوكيل والدخول</td><td class="mid">جزئي</td></tr>
+<tr><td>26</td><td>Race Conditions</td><td>—</td><td class="mid">راجع النقاط/المدفوعات</td></tr>
+<tr><td>27</td><td>GraphQL Abuse</td><td>غير مستخدم</td><td>—</td></tr>
+<tr><td>28</td><td>SSTI</td><td>لا قوالب من مدخلات</td><td class="ok">مغطى</td></tr>
+<tr><td>29</td><td>Prototype Pollution</td><td>npm audit</td><td class="mid">جزئي</td></tr>
+<tr><td>30</td><td>Subdomain Takeover</td><td>—</td><td class="mid">مراقبة DNS مطلوبة</td></tr>
+<tr><td>31</td><td>Session Hijacking</td><td>توكن في الذاكرة + HttpOnly refresh</td><td class="ok">مغطى</td></tr>
+<tr><td>32</td><td>Session Fixation</td><td>إصدار جديد عند الدخول</td><td class="ok">مغطى</td></tr>
+<tr><td>33</td><td>JWT Forgery / alg confusion</td><td>HS256 صريح + فحص نوع التوكن</td><td class="ok">مغطى</td></tr>
+<tr><td>34</td><td>Token Replay/Theft</td><td>عمر 30 د + إبطال refresh (sid)</td><td class="mid">لا jti للـaccess</td></tr>
+<tr><td>35</td><td>Brute Force</td><td>قفل IP+حساب وحساب فقط</td><td class="ok">مغطى (مع Redis)</td></tr>
+<tr><td>36</td><td>Credential Stuffing</td><td>قفل لكل حساب</td><td class="mid">بلا CAPTCHA/HIBP</td></tr>
+<tr><td>37</td><td>Password Spraying</td><td>قفل لكل IP</td><td class="mid">جزئي</td></tr>
+<tr><td>38</td><td>Privilege Escalation</td><td>RBAC + تدقيق الانتحال</td><td class="mid">جزئي</td></tr>
+<tr><td>39</td><td>Account Enumeration</td><td>رسالة موحدة للدخول</td><td class="mid">رد 404 لمسجد غير موجود</td></tr>
+<tr><td>40</td><td>MFA Fatigue / ATO</td><td>—</td><td class="bad">لا MFA</td></tr>
+<tr><td>41</td><td>DDoS L3/L4</td><td>—</td><td class="bad">يتطلب CDN/شبكة تنقية</td></tr>
+<tr><td>42</td><td>DDoS L7 (HTTP flood)</td><td>Rate/Inflight limit في Traefik</td><td class="mid">طبقة أولى فقط</td></tr>
+<tr><td>43</td><td>Slowloris</td><td>مهلات Traefik وGunicorn</td><td class="ok">مغطى جزئياً</td></tr>
+<tr><td>44</td><td>Scraping</td><td>Rate limit</td><td class="mid">جزئي</td></tr>
+<tr><td>45</td><td>MITM / SSL Strip</td><td>HSTS + redirect على الحافة</td><td class="ok">مغطى</td></tr>
+<tr><td>46</td><td>DNS Hijacking</td><td>—</td><td class="mid">قفل المسجّل وDNSSEC خارج الكود</td></tr>
+<tr><td>47</td><td>Exposed Services</td><td>DB على loopback، Redis داخلي</td><td class="ok">مغطى</td></tr>
+<tr><td>48</td><td>Container Escape</td><td>socket-proxy، no-new-privileges</td><td class="mid">الخلفية ما زالت تعمل كجذر</td></tr>
+<tr><td>49</td><td>Supply Chain</td><td>CI audit/gitleaks</td><td class="mid">بلا تثبيت hashes</td></tr>
+<tr><td>50</td><td>Ransomware / Exfiltration</td><td>وحدة النسخ الاحتياطي</td><td class="mid">نسخة خارجية غير قابلة للتعديل مطلوبة</td></tr>
+</table>
+
+<h2>4) استراتيجية DDoS وXSS (مفصولتان)</h2>
+<h3>أ) DDoS/DoS — طبقة الموارد</h3>
+<ul>
+<li><b>مُطبَّق:</b> Rate limit (50 طلب/ث، burst 100) وInflight (100) على API، وRate limit على الواجهة، مهلات قراءة/خمول، حدود Gunicorn، حدود CPU/ذاكرة للخلفية.</li>
+<li><b>غير مُطبَّق (خارج الكود):</b> CDN/WAF (Cloudflare أو ما يعادله) أمام Traefik مع إخفاء IP الأصل وجدار ناري يقبل نطاقاته فقط — هذا هو الدفاع الوحيد الفعّال ضد هجمات L3/L4 الحجمية.</li>
+<li><b>توصية:</b> قاطع دائرة (503) للمسارات الثقيلة (التقارير، الوكيل) عند الحمل العالي، وطوابير Celery مستقلة.</li>
+</ul>
+<h3>ب) XSS — طبقة الكود</h3>
+<ul>
+<li><b>مُطبَّق:</b> CSP (Report-Only) بلا <code>unsafe-inline</code> للسكربتات، وإخراج التوكنات من التخزين (يحدّ أثر XSS)، وNOSNIFF، وReferrer-Policy.</li>
+<li><b>متبقٍ:</b> مراجعة استخدامات <code>innerHTML</code> (مثل مُصدِّر PDF) وتمريرها عبر DOMPurify، ثم تحويل CSP إلى وضع الإنفاذ بعد أسبوع مراقبة.</li>
+<li><b>حدّ معروف:</b> يستطيع XSS إرسال طلبات باسم المستخدم داخل الصفحة نفسها حتى مع نقل التوكن للذاكرة؛ لذلك CSP المُنفَّذة ضرورية.</li>
+</ul>
+
+<h2>5) البنود المعلّقة للوصول إلى 95%</h2>
+<table>
+<tr><th>الأولوية</th><th>البند</th><th>السبب</th></tr>
+<tr><td class="bad">عالية</td><td>CDN/WAF أمام Traefik + إخفاء IP الأصل</td><td>لا حماية من DDoS الحجمي بدونه</td></tr>
+<tr><td class="bad">عالية</td><td>MFA (TOTP) لـ TENANT_ADMIN ومدراء المراكز ومسؤولي المنصة</td><td>أكبر مسار استيلاء على حساب متبقٍ</td></tr>
+<tr><td class="bad">عالية</td><td>تشغيل حاوية الخلفية بمستخدم غير جذري (<code>USER django</code> معلّق حالياً) بعد ضبط ملكية الـvolumes</td><td>الحد من أثر اختراق التطبيق</td></tr>
+<tr><td class="mid">متوسطة</td><td>تحويل CSP من Report-Only إلى إنفاذ بعد المراقبة</td><td>جزء أساسي من دفاع XSS</td></tr>
+<tr><td class="mid">متوسطة</td><td>اختبارات عزل المستأجرين وIDOR لكل View (&gt;60 مساراً)</td><td>لم أراجع كل مسار فردياً</td></tr>
+<tr><td class="mid">متوسطة</td><td>أسرار منفصلة (<code>JWT_SECRET_KEY</code> ≠ <code>SECRET_KEY</code> ≠ <code>PLATFORM_JWT_SECRET</code>) ثم <code>STRICT_SECRETS=True</code></td><td>سر واحد حالياً لكل المستأجرين</td></tr>
+<tr><td class="mid">متوسطة</td><td>نسخ احتياطي خارجي غير قابل للتعديل + اختبار استعادة شهري</td><td>الحماية من الفدية</td></tr>
+<tr><td class="mid">متوسطة</td><td>مسح فيروسات للملفات المرفوعة، وCAPTCHA بعد 5 إخفاقات</td><td>تقوية الرفع والدخول</td></tr>
+<tr><td class="mid">متوسطة</td><td>تجميع السجلات وتنبيهات (401/429، الانتحال)</td><td>الاستجابة للحوادث</td></tr>
+<tr><td>منخفضة</td><td>اختبار اختراق خارجي مصرَّح به على بيئة staging</td><td>رقم تقييم موثوق</td></tr>
+</table>
+
+<h2>6) تنبيهات قبل النشر</h2>
+<ul>
+<li><b>ترتيب النشر:</b> الخلفية أولاً ثم الواجهة؛ العكس يُسجِّل خروج المستخدمين عند إعادة التحميل.</li>
+<li><b>Redis:</b> الإعداد الجديد يضيف خدمة <code>manarasy-redis</code> ويضبط <code>REDIS_URL</code> تلقائياً.</li>
+<li><b>Traefik:</b> أُعيد تعريف مزوّد Docker عبر <code>docker-socket-proxy</code>. لاحظتُ أن ملصقات الخلفية تستخدم المحلّل <code>myresolver</code> بينما ملف Traefik يعرّف <code>letsencrypt</code> — تحقّقوا أيهما المعتمد في الخادم الفعلي قبل تطبيق الملف.</li>
+<li><b>المستخدمون المسجَّلون:</b> توكنهم القديم يُرحَّل إلى الذاكرة ويعمل حتى انتهائه، ثم يعودون لتسجيل الدخول مرة واحدة.</li>
+<li><b>Argon2:</b> يتطلب <code>argon2-cffi</code> (موجود في requirements)؛ الكلمات القديمة تُرقّى تلقائياً عند أول دخول.</li>
+<li>لم أختبر ملفات Docker/Traefik/nginx بتشغيلها؛ تحقّقت فقط من صحة بنية YAML. اختبروها على staging أولاً.</li>
+</ul>
+
+<h2>7) نتائج التحقق</h2>
+<ul>
+<li>اختبارات الخلفية: 21 ناجحاً (12 قائمة + 9 جديدة).</li>
+<li>بناء الواجهة (<code>vite build</code>): ناجح.</li>
+<li>ملفات YAML الثلاثة: صالحة البنية.</li>
+<li>لم تُجرَّب تدفقات الدخول/التجديد في متصفح مع خادم يعمل، ولم يُنفَّذ نشر.</li>
+</ul>
+<p class="meta">ملاحظة: اختبارات الحمل والاختراق تُجرى فقط على بيئة تملكونها وبتصريح داخلي.</p>
+</body></html>

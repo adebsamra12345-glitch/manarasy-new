@@ -5,6 +5,7 @@ import { login as loginApi } from '../../../services/api/authService';
 import { useAuthContext } from '../../../context/AuthContext';
 import { getTenantBranding } from '../../../services/api/tenantService';
 import { FEATURES } from '../../../config/features';
+import { setAccessToken } from '../../../services/tokenStore';
 
 const ROLE_DEFAULT_ROUTE = {
     super_admin: '/super/dashboard',
@@ -170,7 +171,7 @@ const Login = () => {
                     tenant_name: data.data.tenant.name,
                 };
                 // حفظ في localStorage للتوافق مع الكود القديم
-                localStorage.setItem('access_token', data.data.access_token);
+                setAccessToken(data.data.access_token);
                 localStorage.setItem('tenant_id', data.data.tenant.id);
                 localStorage.setItem('tenant_name', data.data.tenant.name);
                 localStorage.setItem('user_role', data.data.user.role);

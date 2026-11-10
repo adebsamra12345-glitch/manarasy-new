@@ -287,6 +287,10 @@ def tenant_login_view(request):
         fail_key = 'tenant_login_fail:%s:%s:%s' % (BaseThrottle().get_ident(request), subdomain, username)
         max_fail = getattr(settings, 'TENANT_LOGIN_MAX_FAILURES', 5)
         lock_seconds = getattr(settings, 'TENANT_LOGIN_LOCK_MINUTES', 15) * 60
+        acct_key = 'tenant_login_fail_acct:%s:%s' % (subdomain, username)
+        acct_max = getattr(settings, 'TENANT_LOGIN_ACCOUNT_MAX_FAILURES', 20)
+        if cache.get(acct_key, 0) >= acct_max:
+            return JsonResponse({"status": "error", "message": "تم تعليق محاولات الدخول لهذا الحساب مؤقتاً"}, status=429)
         if cache.get(fail_key, 0) >= max_fail:
             return JsonResponse({
                 "status": "error",
@@ -349,6 +353,11 @@ def tenant_login_view(request):
                 role = "TENANT_ADMIN"
 
         if not is_authenticated:
+            cache.add(acct_key, 0, lock_seconds)
+            try:
+                cache.incr(acct_key)
+            except ValueError:
+                cache.set(acct_key, 1, lock_seconds)
             cache.add(fail_key, 0, lock_seconds)
             try:
                 cache.incr(fail_key)
@@ -360,6 +369,7 @@ def tenant_login_view(request):
             }, status=401)
 
         cache.delete(fail_key)
+        cache.delete(acct_key)
 
         profile_center_id = None
         profile_center_name = None
@@ -395,7 +405,8 @@ def tenant_login_view(request):
         
         token = jwt.encode(payload, jwt_secret, algorithm="HS256")
 
-        return JsonResponse({
+        from .session_views import make_refresh_token, set_refresh_cookie
+        login_response = JsonResponse({
             "status": "success",
             "message": "تم تسجيل الدخول بنجاح",
             "data": {
@@ -419,6 +430,10 @@ def tenant_login_view(request):
                 }
             }
         }, status=200)
+        # Refresh token في كوكي HttpOnly (لا يصل إلى JavaScript). حساب manager الاحتياطي بلا user_id لا يحصل عليه.
+        if target_user:
+            set_refresh_cookie(login_response, make_refresh_token(tenant, target_user.id, target_user.username))
+        return login_response
 
     except Exception as e:
         print(f"[ERROR] Login failed: {str(e)}")

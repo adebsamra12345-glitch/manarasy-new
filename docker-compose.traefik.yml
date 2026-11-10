@@ -2,15 +2,24 @@ version: '3.8'
 
 services:
   traefik:
-    image: traefik:v2.10
+    image: traefik:v2.11
     container_name: manarasy-traefik
     restart: unless-stopped
     command:
-      - "--api.dashboard=true"
+      - "--api.dashboard=false"
+      - "--api.insecure=false"
+      - "--ping=false"
       - "--providers.docker=true"
+      - "--providers.docker.endpoint=tcp://docker-socket-proxy:2375"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=30s"
+      - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=60s"
+      - "--entrypoints.websecure.http.tls.options=default"
+      - "--accesslog=true"
       - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.email=admin@manarasy.io"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
@@ -18,10 +27,29 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "traefik_certificates:/letsencrypt"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - docker-socket-proxy
     networks:
       - proxy
+      - socket
+
+  # وسيط للـ Docker socket: يسمح لـ Traefik بقراءة الحاويات فقط (لا تركيب مباشر لـ docker.sock)
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.2.0
+    container_name: manarasy-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - socket
 
 volumes:
   traefik_certificates:
@@ -30,3 +58,5 @@ volumes:
 networks:
   proxy:
     external: true
+  socket:
+    internal: true
