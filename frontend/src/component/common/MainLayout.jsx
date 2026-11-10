@@ -12,6 +12,7 @@ import StudentSidebar from '../sideBar/StudentSidebar';
 
 // Navbar
 import { MobileTopbar, MobileNavbar } from '../navbar/Navbar';
+import AgentCommandButton from '../agent/AgentCommandButton';
 
 /**
  * MainLayout — الهيكل الرئيسي للتطبيق
@@ -48,6 +49,9 @@ const MainLayout = () => {
 
             {/* شريط التنقل السفلي — يُخفى على الحاسوب */}
             <MobileNavbar />
+
+            {/* مساعد منارة: أوامر صوتية/كتابية */}
+            <AgentCommandButton />
         </div>
     );
 };

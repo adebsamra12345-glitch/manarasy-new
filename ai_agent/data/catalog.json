@@ -1,0 +1,511 @@
+{
+  "intents": {
+    "mark_attendance": {
+      "roles": [
+        "TEACHER",
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/attendance/"
+      },
+      "slots": [
+        "student",
+        "status",
+        "halaqa?"
+      ],
+      "requires_confirmation": false
+    },
+    "mark_all_present": {
+      "roles": [
+        "TEACHER",
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "attendance.markAllPresent"
+      },
+      "slots": [
+        "halaqa?"
+      ],
+      "requires_confirmation": false
+    },
+    "start_session": {
+      "roles": [
+        "TEACHER",
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/attendance/sessions/start/"
+      },
+      "slots": [
+        "halaqa?"
+      ],
+      "requires_confirmation": false
+    },
+    "evaluate_recitation": {
+      "roles": [
+        "TEACHER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/recitation/evaluate/"
+      },
+      "slots": [
+        "student",
+        "grade",
+        "page?",
+        "recitation_type?",
+        "behavior?"
+      ],
+      "requires_confirmation": false
+    },
+    "evaluate_recitation_range": {
+      "roles": [
+        "TEACHER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/recitation/evaluate/"
+      },
+      "slots": [
+        "student",
+        "grade",
+        "surah",
+        "ayah_from",
+        "ayah_to"
+      ],
+      "requires_confirmation": false
+    },
+    "grant_bonus_points": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/points-and-rewards/points/bonus/"
+      },
+      "slots": [
+        "student",
+        "points"
+      ],
+      "requires_confirmation": false
+    },
+    "show_points_transactions": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "GET",
+        "endpoint": "/api/points-and-rewards/points/transactions/"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "show_reward_claims": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "GET",
+        "endpoint": "/api/points-and-rewards/rewards/claims/"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "redeem_reward": {
+      "roles": [
+        "STUDENT"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/points-and-rewards/student-portal/claim-reward/"
+      },
+      "slots": [
+        "reward"
+      ],
+      "requires_confirmation": true
+    },
+    "show_my_points": {
+      "roles": [
+        "STUDENT"
+      ],
+      "action": {
+        "type": "api",
+        "method": "GET",
+        "endpoint": "/api/points-and-rewards/student-portal/dashboard/"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "mark_notifications_read": {
+      "roles": [
+        "STUDENT"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/points-and-rewards/student-portal/notifications/mark-read/"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "search_student": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "students.search"
+      },
+      "slots": [
+        "student"
+      ],
+      "requires_confirmation": false
+    },
+    "open_student_activity": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "navigate",
+        "route": "{prefix}/students/{studentId}/activity"
+      },
+      "slots": [
+        "student"
+      ],
+      "requires_confirmation": false
+    },
+    "open_halaqa_sessions": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "navigate",
+        "route": "{prefix}/rings/{ringId}/sessions"
+      },
+      "slots": [
+        "halaqa"
+      ],
+      "requires_confirmation": false
+    },
+    "add_student": {
+      "roles": [
+        "TEACHER",
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "students.openAddWizard"
+      },
+      "slots": [
+        "student?",
+        "halaqa?"
+      ],
+      "requires_confirmation": false
+    },
+    "delete_student_request": {
+      "roles": [
+        "TEACHER",
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/students-and-parents/students/deletion-requests/"
+      },
+      "slots": [
+        "student"
+      ],
+      "requires_confirmation": true
+    },
+    "approve_requests": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/students-and-parents/students/requests/bulk-approve/"
+      },
+      "slots": [],
+      "requires_confirmation": true
+    },
+    "show_requests": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "requests.openPanel"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "generate_certificate": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/reports/certificates/"
+      },
+      "slots": [
+        "student"
+      ],
+      "requires_confirmation": false
+    },
+    "show_analytics": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "GET",
+        "endpoint": "/api/reports/analytics/"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "create_competition": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "competitions.openCreate"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "start_competition": {
+      "roles": [
+        "STUDENT"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/student/competitions/{id}/start/"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "switch_role": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER",
+        "STUDENT"
+      ],
+      "action": {
+        "type": "api",
+        "method": "POST",
+        "endpoint": "/api/users/switch-role/"
+      },
+      "slots": [
+        "role"
+      ],
+      "requires_confirmation": false
+    },
+    "change_password": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER",
+        "STUDENT"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "auth.openChangePassword"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "logout": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER",
+        "STUDENT"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "auth.logout"
+      },
+      "slots": [],
+      "requires_confirmation": true
+    },
+    "open_ai_assistant": {
+      "roles": [
+        "TENANT_ADMIN"
+      ],
+      "action": {
+        "type": "ui",
+        "handler": "ai.openAssistant"
+      },
+      "slots": [],
+      "requires_confirmation": false
+    },
+    "student_memorization_prediction": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ],
+      "action": {
+        "type": "api",
+        "method": "GET",
+        "endpoint": "/api/ai/memorization-prediction/{studentId}/"
+      },
+      "slots": [
+        "student"
+      ],
+      "requires_confirmation": false
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER",
+        "STUDENT"
+      ]
+    },
+    "users": {
+      "roles": [
+        "TENANT_ADMIN"
+      ]
+    },
+    "projects": {
+      "roles": [
+        "TENANT_ADMIN"
+      ]
+    },
+    "students": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ]
+    },
+    "teachers": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ]
+    },
+    "rings": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ]
+    },
+    "centers": {
+      "roles": [
+        "TENANT_ADMIN"
+      ]
+    },
+    "sessions": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER"
+      ]
+    },
+    "rewards": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ]
+    },
+    "reports": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER"
+      ]
+    },
+    "settings": {
+      "roles": [
+        "TENANT_ADMIN"
+      ]
+    },
+    "profile": {
+      "roles": [
+        "TENANT_ADMIN",
+        "CENTER_MANAGER",
+        "TEACHER",
+        "STUDENT"
+      ]
+    },
+    "attendance": {
+      "roles": [
+        "TEACHER"
+      ]
+    },
+    "recitation": {
+      "roles": [
+        "TEACHER"
+      ]
+    },
+    "progress": {
+      "roles": [
+        "TEACHER"
+      ]
+    },
+    "competitions": {
+      "roles": [
+        "STUDENT"
+      ]
+    },
+    "report": {
+      "roles": [
+        "STUDENT"
+      ]
+    },
+    "notifications": {
+      "roles": [
+        "STUDENT"
+      ]
+    }
+  },
+  "role_prefix": {
+    "TENANT_ADMIN": "/admin",
+    "CENTER_MANAGER": "/center-manager",
+    "TEACHER": "/teacher",
+    "STUDENT": "/student"
+  }
+}

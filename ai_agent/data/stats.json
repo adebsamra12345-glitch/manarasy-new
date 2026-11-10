@@ -1,0 +1,51 @@
+{
+  "total": 16122,
+  "splits": {
+    "test": 1609,
+    "train": 12942,
+    "val": 1571
+  },
+  "intents": {
+    "mark_attendance": 400,
+    "permission_denied": 1383,
+    "mark_all_present": 323,
+    "start_session": 349,
+    "evaluate_recitation": 399,
+    "evaluate_recitation_range": 400,
+    "grant_bonus_points": 400,
+    "show_points_transactions": 264,
+    "show_reward_claims": 288,
+    "redeem_reward": 364,
+    "show_my_points": 234,
+    "mark_notifications_read": 263,
+    "search_student": 400,
+    "open_student_activity": 400,
+    "open_halaqa_sessions": 382,
+    "add_student": 376,
+    "delete_student_request": 400,
+    "approve_requests": 285,
+    "show_requests": 297,
+    "generate_certificate": 400,
+    "show_analytics": 290,
+    "create_competition": 310,
+    "start_competition": 251,
+    "switch_role": 376,
+    "change_password": 329,
+    "logout": 321,
+    "open_ai_assistant": 216,
+    "student_memorization_prediction": 400,
+    "navigate": 5483,
+    "clarify": 39,
+    "out_of_scope": 100
+  },
+  "channels": {
+    "text": 6887,
+    "voice": 9235
+  },
+  "roles": {
+    "TEACHER": 4237,
+    "CENTER_MANAGER": 3663,
+    "TENANT_ADMIN": 5048,
+    "STUDENT": 3174
+  }
+}

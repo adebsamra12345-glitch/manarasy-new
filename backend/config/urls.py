@@ -23,6 +23,7 @@ api_urlpatterns = [
     path('centers-and-projects/', include('tenant_modules.centers_and_projects.urls')),
     path('centers/', include('tenant_modules.centers_and_projects.urls')),
     path('halaqat/', include('tenant_modules.halaqat.urls')),
+    path('agent/', include('tenant_modules.agent.urls')),
     path('students-and-parents/', include('tenant_modules.students_and_parents.urls')),
     path('attendance/', include('tenant_modules.attendance.urls')),
     path('recitation/', include('tenant_modules.recitation_and_sabr.urls')),
