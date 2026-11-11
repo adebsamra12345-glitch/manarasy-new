@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
 سكربت التدريب الخفيف (QLoRA 4-bit NF4) لنموذج Qwen3-8B في منصة «منارة»:
-- مصمم خصيصاً لكرت NVIDIA RTX 5070 Ti (16GB VRAM) مع وجود ~6.4GB مستخدمة من خدمات أخرى.
-- يستهلك أثناء التدريب ~6.2GB فقط بفضل:
+- مصمم لكرت NVIDIA RTX 5070 Ti (16GB VRAM) ويحتاج كرتاً شبه فارغ أثناء التدريب
+  (القياس الفعلي: Peak ~9.5GB؛ لا يتعايش مع vLLM أو خدمات GPU أخرى ثقيلة).
+- يخفّض الاستهلاك عبر:
   * تكميم 4-bit NF4 مع Double Quantization (bnb_4bit_use_double_quant=True)
   * Gradient Checkpointing (use_reentrant=False)
   * محسن Paged AdamW 8-bit (paged_adamw_8bit)
   * per_device_train_batch_size=1 + gradient_accumulation_steps=8 + max_seq_length=1024
-- يفرض سقفاً صارماً لذاكرة العملية عبر torch.cuda.set_per_process_memory_fraction
-  لضمان بقاء هامش آمن >= 2.5GB للخدمات الأخرى طوال فترة التدريب.
+- يفرض سقفاً لذاكرة العملية عبر torch.cuda.set_per_process_memory_fraction (الافتراضي 0.85).
+  السقف القديم 0.44 يفشل بـ OOM داخل prepare_model_for_kbit_training (تحويل embeddings إلى fp32).
 - يحوّل أمثلة train.jsonl وval.jsonl إلى تنسيق Qwen3 ChatML الأصلي (مع <tools> و<tool_call> وبدون <think>).
 - يدعم وضع --dry-run للتحقق من تنسيق البيانات والـ Prompts بدون الحاجة لوجود GPU.
 """
@@ -126,7 +127,15 @@ def main() -> int:
     parser.add_argument("--max-seq-len", type=int, default=1024)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
-    parser.add_argument("--max-vram-fraction", type=float, default=0.44, help="سقف استهلاك العملية من الكرت (~7.0GB)")
+    # التدريب يحتاج كرتاً شبه فارغ (أوقف vLLM أولاً — run_train.sh يفعل ذلك):
+    # 0.44 يفشل بـ OOM داخل prepare_model_for_kbit_training (تحويل embeddings إلى fp32)،
+    # و0.85 نجح فعلياً على RTX 5070 Ti 16GB (Peak ~9.5GB).
+    parser.add_argument(
+        "--max-vram-fraction",
+        type=float,
+        default=0.85,
+        help="سقف استهلاك العملية من الكرت (0.85 ≈ 13.6GB من 16GB؛ يتطلب كرتاً شبه فارغ)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="فحص البيانات والتنسيق دون تحميل النموذج على الـ GPU")
     args = parser.parse_args()
 
@@ -144,15 +153,14 @@ def main() -> int:
         AutoModelForCausalLM,
         AutoTokenizer,
         BitsAndBytesConfig,
-        TrainingArguments,
     )
-    from trl import SFTTrainer
+    from trl import SFTConfig, SFTTrainer
 
     if not torch.cuda.is_available():
         print("❌ لم يتم العثور على بطاقة CUDA GPU. استخدم --dry-run للفحص بدون GPU.", file=sys.stderr)
         return 2
 
-    # فرض سقف الذاكرة للعملية بحيث لا تتجاوز ~7.0GB أبداً ويبقى هامش آمن >= 2.5GB
+    # فرض سقف ذاكرة العملية (الافتراضي 0.85 من الكرت؛ التدريب يحتاج كرتاً شبه فارغ)
     torch.cuda.set_per_process_memory_fraction(args.max_vram_fraction, device=0)
 
     print(f"🚀 تحميل الـ Tokenizer والنموذج الأساسي من: {args.model_path}")
@@ -194,7 +202,7 @@ def main() -> int:
     model.print_trainable_parameters()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=str(args.output_dir),
         num_train_epochs=args.epochs,
         per_device_train_batch_size=1,
@@ -221,6 +229,8 @@ def main() -> int:
         max_grad_norm=0.3,
         report_to="none",
         seed=42,
+        max_length=args.max_seq_len,
+        dataset_text_field="text",
     )
 
     trainer = SFTTrainer(

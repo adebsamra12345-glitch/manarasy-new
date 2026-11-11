@@ -2,8 +2,8 @@
 # بيئة الاستدلال والصوت لمنصة منارة (GPU Node - adebserver)
 # الكرت: NVIDIA RTX 5070 Ti (16GB VRAM)
 # المستخدم من خدمات أخرى: ~6.4GB
-# مخصص لـ vLLM (Qwen3-8B 4-bit): gpu-memory-utilization=0.40 (~6.55GB)
-# الهامش الآمن المتبقي: >= 2.5GB
+# vLLM 0.33 أزال bitsandbytes: نستخدم FP8 online (Qwen3-8B ~9GB أوزان) مع gpu-memory-utilization=0.80 (~12.4GB)
+# يتطلب كرتاً شبه مخصص (لا يتعايش مع خدمات أخرى تستهلك ~6.4GB)
 # ==========================================
 
 services:
@@ -18,9 +18,8 @@ services:
     command: >
       --model /models/Qwen3-8B
       --served-model-name base
-      --quantization bitsandbytes
-      --load-format bitsandbytes
-      --gpu-memory-utilization 0.40
+      --quantization fp8
+      --gpu-memory-utilization 0.80
       --max-model-len 4096
       --max-num-seqs 4
       --enable-auto-tool-choice
