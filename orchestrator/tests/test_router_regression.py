@@ -57,3 +57,12 @@ def test_ui_golden_not_ui_cases_are_never_hijacked_by_router():
         if c["expect"].get("not_ui"):
             reset_slots()
             assert route_message(p, c["role"], c["utterance"], "g") is None, c["utterance"]
+
+
+def test_no_golden_case_is_hijacked_by_router():
+    """كل عبارات التقييم الذهبي (أدوات/غموض/أمان) يجب أن تصل للنموذج لا للموجّه الحتمي."""
+    golden = json.loads((Path(__file__).resolve().parent.parent / "eval" / "golden_ar.json").read_text(encoding="utf-8"))
+    for c in golden:
+        reset_slots()
+        p = Principal("u1", "teacher", "t1", [])
+        assert route_message(p, c["role"], c["utterance"], "g") is None, f"{c['id']}: {c['utterance']}"

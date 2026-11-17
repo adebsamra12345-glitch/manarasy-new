@@ -719,6 +719,66 @@
    "expect": {
     "passthrough": true
    }
+  },
+  {
+   "id": "PASS-W1",
+   "role": "TEACHER",
+   "steps": [
+    "بدي سجل حضور لطالب هلق"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-W2",
+   "role": "TEACHER",
+   "steps": [
+    "سجل حضور الطالب خالد يوسف"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-W3",
+   "role": "TEACHER",
+   "steps": [
+    "حطلي خالد غايب"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-W4",
+   "role": "TEACHER",
+   "steps": [
+    "اعتمد طلب التسجيل"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-W5",
+   "role": "TEACHER",
+   "steps": [
+    "عطني نظرة عامة على الحلقات وعدد الطلاب فيها"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-W6",
+   "role": "TEACHER",
+   "steps": [
+    "كم نقاط الطالب خالد يوسف وما الصفحة التي وصل إليها؟"
+   ],
+   "expect": {
+    "passthrough": true
+   }
   }
  ]
 }

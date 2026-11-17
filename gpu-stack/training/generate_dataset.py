@@ -271,6 +271,38 @@ def generate_all_samples(seed: int = 42) -> list[dict]:
                 _agent_sample("CENTER_MANAGER", dialect, "tool_call", pat, "approve_registration", {"request_id": req_id})
             )
 
+    # ─── 3b. أدوات القراءة المضافة لاحقاً (لم تكن ضمن تدريب v1-v3: وجودها في المواصفات دون تدريب يضعف اختيار الأدوات) ───
+    read_tools = [
+        # (لهجة، قالب، أداة، دالة المعاملات)
+        ("فصحى", "اعرض لي طلاب {h}", "list_students", lambda n, h: {"halaqa_query": h}),
+        ("سورية", "مين الطلاب يلي بـ{h}؟", "list_students", lambda n, h: {"halaqa_query": h}),
+        ("قطرية", "شنو أسماء الطلاب في {h}؟", "list_students", lambda n, h: {"halaqa_query": h}),
+        ("فصحى", "ما تقرير حضور الطالب {n} هذا الأسبوع؟", "attendance_report", lambda n, h: {"student_query": n, "period": "week"}),
+        ("سورية", "شو وضع حضور {n} هالشهر؟", "attendance_report", lambda n, h: {"student_query": n, "period": "month"}),
+        ("قطرية", "أبي تقرير حضور {n} لهالأسبوع", "attendance_report", lambda n, h: {"student_query": n, "period": "week"}),
+        ("فصحى", "أعطني تقرير حضور {h} لهذا الشهر", "attendance_report", lambda n, h: {"halaqa_query": h, "period": "month"}),
+        ("سورية", "كيف كان حضور {h} هالأسبوع؟", "attendance_report", lambda n, h: {"halaqa_query": h, "period": "week"}),
+        ("قطرية", "وش حضور {h} هالشهر؟", "attendance_report", lambda n, h: {"halaqa_query": h, "period": "month"}),
+        ("فصحى", "ما آخر تقييمات التسميع للطالب {n}؟", "recitation_history", lambda n, h: {"student_query": n}),
+        ("سورية", "فرجيني آخر تسميعات {n}", "recitation_history", lambda n, h: {"student_query": n}),
+        ("قطرية", "أبي أشوف آخر تسميع سمعه {n}", "recitation_history", lambda n, h: {"student_query": n}),
+        ("فصحى", "اعرض سجل نقاط الطالب {n}", "points_history", lambda n, h: {"student_query": n}),
+        ("سورية", "شو سجل نقاط {n}؟ ليش أخد نقاط؟", "points_history", lambda n, h: {"student_query": n}),
+        ("قطرية", "ليش {n} أخذ نقاط؟ وريني السجل", "points_history", lambda n, h: {"student_query": n}),
+    ]
+    for dialect, pat, tname, mk in read_tools:
+        for _ in range(8):
+            name = rng.choice(STUDENT_NAMES)
+            halaqa = rng.choice(HALAQA_NAMES)
+            utt = pat.format(n=name, h=halaqa)
+            if utt in golden_utterances:
+                continue
+            samples.append(_agent_sample("TEACHER", dialect, "tool_call", utt, tname, mk(name, halaqa)))
+    for dialect, utt in (("فصحى", "أريد تقرير الحضور"), ("سورية", "بدي تقرير الحضور"), ("قطرية", "أبي تقرير الحضور")):
+        for _ in range(3):
+            samples.append(_agent_sample("TEACHER", dialect, "missing_param", utt, "ask_clarification",
+                                         {"unclear_part": "اسم الطالب أو الحلقة", "question_ar": "هل ترغب في تقرير الحضور لطالب محدد أم لحلقة كاملة؟"}))
+
     # ─── 4. Missing Parameter -> ask_clarification (Critical Anti-Hallucination)
     missing_cases = [
         # نقص اسم الطالب

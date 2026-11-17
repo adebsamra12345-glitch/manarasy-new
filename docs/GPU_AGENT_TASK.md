@@ -1,5 +1,9 @@
 # أمر تنفيذ لوكيل جهاز الـ GPU (adebserver)
 
+> **تحديث 2026-11-17:** المحوّل `manarasy-qwen3-v3` موجود أصلاً على الجهاز (دُرِّب في 16 نوفمبر، ويُحمَّل حالياً تحت اسم `manarasy`) وتراجع في `missing_param`. لذلك سُمّي المحوّل الجديد **v4**.
+> **سبب أساسي اكتُشف:** المحوّلات v1-v3 دُرِّبت على 8 أدوات، بينما كود المستودع يعرض 13 أداة (أضيفت `list_students` و`attendance_report` و`recitation_history` و`points_history`، ثم `open_screen`). عرض أدوات لم يُدرَّب عليها يخفض الدقة: v2 يسجل 20/20 مع الكود القديم و17/20 مع الكود الجديد. بيانات v4 تشمل الآن الأدوات الأربع. راجع `docs/gpu_report_baseline_2026-11-17.md`.
+
+
 > انسخ ما بين الفاصلين إلى وكيل (Claude Code) يعمل على جهاز الـ GPU داخل نسخة المستودع.
 > شرط مسبق على جهاز التطوير: ارتكاب التغييرات ودفعها إلى فرع `feat/ai-production-stack` ثم `git pull` على الجهاز.
 
@@ -44,12 +48,12 @@ EVAL_TAG=v2 python eval/evaluate_ui.py || true     # قد يخرج بكود 1 ل
 ```
 احفظ `gpu-stack/data/eval_report_v2.json` و`eval_ui_v2.json`. إن لم يعمل المحوّل `manarasy` ارجع للنموذج `base` واذكر ذلك في التقرير.
 
-## المرحلة 2: بيانات v3
+## المرحلة 2: بيانات v4
 ```bash
 cd gpu-stack/training
-python generate_dataset.py --suffix v3 && python validate_dataset.py v3    # يجب: تسرب البيانات = 0
-cd .. && DATA_SUFFIX=v3 python training/build_mixed_dataset.py             # يتطلب data/general_pairs.jsonl
-wc -l data/train_mixed_v3.jsonl data/val_mixed_v3.jsonl
+python generate_dataset.py --suffix v4 && python validate_dataset.py v4    # يجب: تسرب البيانات = 0
+cd .. && DATA_SUFFIX=v4 python training/build_mixed_dataset.py             # يتطلب data/general_pairs.jsonl
+wc -l data/train_mixed_v4.jsonl data/val_mixed_v4.jsonl
 ```
 إن غاب `general_pairs.jsonl` فولّده بـ `orchestrator/eval/generate_general_data.py` (راجع الملف قبل التشغيل) أو أبلغني.
 
@@ -57,21 +61,21 @@ wc -l data/train_mixed_v3.jsonl data/val_mixed_v3.jsonl
 أخبرني بما يلي وانتظر «موافق»: نافذة التوقف، الذاكرة الحرة الحالية، وتقدير الزمن (لا يوجد قياس سابق؛ قدّره من أول 50 خطوة).
 ```bash
 cd gpu-stack
-TRAIN_FILE=data/train_mixed_v3.jsonl VAL_FILE=data/val_mixed_v3.jsonl \
-ADAPTER_NAME=manarasy-qwen3-v3 LR=1e-4 EPOCHS=2 training/run_train.sh 2>&1 | tee ~/train_v3.log
+TRAIN_FILE=data/train_mixed_v4.jsonl VAL_FILE=data/val_mixed_v4.jsonl \
+ADAPTER_NAME=manarasy-qwen3-v4 LR=1e-4 EPOCHS=2 training/run_train.sh 2>&1 | tee ~/train_v3.log
 ```
-سجّل: الزمن الفعلي، ذروة VRAM، خسارة التدريب/التحقق (`data/training_summary_manarasy-qwen3-v3.json`). تأكد أن vLLM عاد للعمل بعد التدريب (`docker ps`، `/health`). إن ظهر OOM فخفّض `MAX_VRAM_FRACTION` أو طول التسلسل وأعد المحاولة مرة واحدة فقط ثم أبلغني.
+سجّل: الزمن الفعلي، ذروة VRAM، خسارة التدريب/التحقق (`data/training_summary_manarasy-qwen3-v4.json`). تأكد أن vLLM عاد للعمل بعد التدريب (`docker ps`، `/health`). إن ظهر OOM فخفّض `MAX_VRAM_FRACTION` أو طول التسلسل وأعد المحاولة مرة واحدة فقط ثم أبلغني.
 
-## المرحلة 4: تحميل v3 وبوابة القبول
-في `gpu-stack/.env`: `LORA_MODULES="manarasy_v3=manarasy-qwen3-v3 manarasy=manarasy-qwen3-v2 manarasy_v1=manarasy-qwen3-v1"` ثم `./up.sh restart`.
+## المرحلة 4: تحميل v4 وبوابة القبول
+في `gpu-stack/.env`: `LORA_MODULES="manarasy_v4=manarasy-qwen3-v4 manarasy=manarasy-qwen3-v3 manarasy_v2=manarasy-qwen3-v2 manarasy_v1=manarasy-qwen3-v1"` ثم `./up.sh restart`.
 ```bash
-curl -s http://$TS_IP:8000/v1/models | grep -o '"id":"[^"]*"'     # يجب ظهور manarasy_v3 و manarasy
+curl -s http://$TS_IP:8000/v1/models | grep -o '"id":"[^"]*"'     # يجب ظهور manarasy_v4 و manarasy
 cd orchestrator
-export VLLM_MODEL_AGENT=manarasy_v3 AGENT_UI_TOOL=1 EVAL_LIVE_VLLM=1 EVAL_TAG=v3
+export VLLM_MODEL_AGENT=manarasy_v4 AGENT_UI_TOOL=1 EVAL_LIVE_VLLM=1 EVAL_TAG=v4
 python eval/evaluate_golden.py
 python eval/evaluate_ui.py
 python eval/independent_eval_ar.py   # إن كان متاحاً؛ راجع رأس الملف لمتغيراته
-cd ../gpu-stack/training && python compare_eval.py --before ../data/eval_report_v2.json --after ../data/eval_report_v3.json
+cd ../gpu-stack/training && python compare_eval.py --before ../data/eval_report_v2.json --after ../data/eval_report_v4.json
 ```
 **معايير القبول (كلها شرط):** لا تراجع في `missing_param`/`rbac_security`/`prompt_injection`/`scope_isolation`؛ دقة التنقل في `evaluate_ui.py` ≥ 90%؛ تحويل خاطئ = 0؛ خرق صلاحيات = 0؛ نسبة CJK في الكتابة الحرة لا تتجاوز الأساس + 5%. إن فشل أي معيار: لا تنشر، واحفظ الحالات الفاشلة وحلّل أنماطها (أي فئات/لهجات) واقترح تعديلاً لبيانات التدريب بدل تعديل المعايير.
 
@@ -91,7 +95,7 @@ cd ../gpu-stack/training && python compare_eval.py --before ../data/eval_report_
 لا تفعّل `AI_FEATURE_TTS_SPEECH` ولا تغيّر إعدادات الإنتاج.
 
 ## المرحلة 7: النشر التدريجي (بعد موافقتي فقط)
-على خادم orchestrator: `VLLM_MODEL_AGENT_CANARY=manarasy_v3`، `AGENT_CANARY_TENANTS=<مسجدي-التجريبي>`، `AGENT_CANARY_PERCENT=5`. بعد التشغيل تحقق:
+على خادم orchestrator: `VLLM_MODEL_AGENT_CANARY=manarasy_v4`، `AGENT_CANARY_TENANTS=<مسجدي-التجريبي>`، `AGENT_CANARY_PERCENT=5`. بعد التشغيل تحقق:
 ```bash
 curl -s http://<orchestrator>:8080/health | python3 -m json.tool | grep -A6 agent_rollout
 curl -s http://<orchestrator>:8080/metrics | grep -E "agent_variant|agent_ui_action|vllm_canary"
@@ -100,7 +104,7 @@ curl -s http://<orchestrator>:8080/metrics | grep -E "agent_variant|agent_ui_act
 
 ## التسليم
 أنشئ `docs/gpu_report_<التاريخ>.md` يضم:
-- جدول: v2 مقابل v3 (الذهبي، UI، الفئات الحرجة، CJK) مع قرار القبول/الرفض.
+- جدول: v2 مقابل v4 (الذهبي، UI، الفئات الحرجة، CJK) مع قرار القبول/الرفض.
 - التدريب: الزمن، VRAM، الخسائر، أي أخطاء وكيف عولجت.
 - جدول الأداء قبل/بعد لكل إعداد vLLM مع القرار.
 - مرشحو TTS: الأرقام والعينات ومسارها ومشاكل الترخيص/الدعم.
