@@ -5,11 +5,13 @@
 - محمي بـ Timeouts وRetries وCircuit Breaker.
 """
 import json
+import re
 from typing import Any, AsyncIterator
 
 import httpx
 
 from .config import get_settings
+from .observability import logger as _obs_logger, metrics
 from .resilience import llm_circuit, retry_with_backoff
 from .security import sanitize_model_output
 
@@ -24,6 +26,52 @@ def set_mock_llm_transport(transport: httpx.AsyncBaseTransport | None) -> None:
 
 def _make_async_client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, transport=_custom_async_transport)
+
+
+# حارس الحروف الدخيلة: الصينية/اليابانية/الكورية (المحوّل يُنتجها أحياناً وسط النص العربي)
+CJK_RE = re.compile("[\u3000-\u9fff\uac00-\ud7af\u3040-\u30ff]")
+
+
+def has_cjk(text: str) -> bool:
+    return bool(text) and CJK_RE.search(text) is not None
+
+
+def strip_cjk(text: str) -> str:
+    return CJK_RE.sub("", text)
+
+
+def _tool_calls_have_cjk(tool_calls: list[dict[str, Any]]) -> bool:
+    for tc in tool_calls or []:
+        args = ((tc or {}).get("function") or {}).get("arguments")
+        if isinstance(args, str):
+            # قيم arguments (JSON مُسلسل)؛ يُفحص النص الخام فيشمل كل القيم
+            if has_cjk(args):
+                return True
+        elif isinstance(args, dict) and has_cjk(json.dumps(args, ensure_ascii=False)):
+            return True
+    return False
+
+
+def _strip_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for tc in tool_calls or []:
+        tc = json.loads(json.dumps(tc))
+        fn = tc.get("function") or {}
+        if isinstance(fn.get("arguments"), str):
+            fn["arguments"] = strip_cjk(fn["arguments"])
+        elif isinstance(fn.get("arguments"), dict):
+            fn["arguments"] = json.loads(strip_cjk(json.dumps(fn["arguments"], ensure_ascii=False)))
+        out.append(tc)
+    return out
+
+
+def _log_cjk(action: str, endpoint: str, model: str, length: int) -> None:
+    # خصوصية: العداد والطول فقط، لا نص الرد
+    metrics.inc_cjk_guard(action, endpoint)
+    _obs_logger.info(json.dumps(
+        {"event": "cjk_guard", "action": action, "endpoint": endpoint, "model": model, "content_len": length},
+        ensure_ascii=False,
+    ))
 
 
 async def check_vllm_ready() -> bool:
@@ -47,42 +95,57 @@ async def chat_completion(
     temperature: float | None = None,
     enable_thinking: bool = False,
     tools: list[dict[str, Any]] | None = None,
+    model: str | None = None,
+    endpoint: str = "",
 ) -> dict[str, Any]:
     s = get_settings()
+    model = model or s.vllm_model_text
     capped_tokens = min(max_tokens or s.max_output_tokens, s.max_output_tokens)
     temp = s.default_temperature if temperature is None else temperature
 
-    payload: dict[str, Any] = {
-        "model": s.vllm_model_name,
-        "messages": messages,
-        "max_tokens": capped_tokens,
-        "temperature": temp,
-        "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
-    }
-    if tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+    async def _call_model(model_name: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": capped_tokens,
+            "temperature": temp,
+            "chat_template_kwargs": {"enable_thinking": bool(enable_thinking)},
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
-    async def _do_call() -> dict[str, Any]:
-        async with _make_async_client(timeout=s.llm_timeout_seconds) as client:
-            r = await client.post(f"{s.vllm_base_url}/chat/completions", json=payload)
-            r.raise_for_status()
-            return r.json()
+        async def _do_call() -> dict[str, Any]:
+            async with _make_async_client(timeout=s.llm_timeout_seconds) as client:
+                r = await client.post(f"{s.vllm_base_url}/chat/completions", json=payload)
+                r.raise_for_status()
+                return r.json()
 
-    data = await retry_with_backoff(_do_call, llm_circuit)
-    choice = (data.get("choices") or [{}])[0]
-    msg = choice.get("message") or {}
-    usage = data.get("usage") or {}
+        data = await retry_with_backoff(_do_call, llm_circuit)
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        usage = data.get("usage") or {}
+        return {
+            "content": sanitize_model_output(msg.get("content") or ""),
+            "tool_calls": msg.get("tool_calls") or [],
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+        }
 
-    raw_content = msg.get("content") or ""
-    clean_content = sanitize_model_output(raw_content)
-
-    return {
-        "content": clean_content,
-        "tool_calls": msg.get("tool_calls") or [],
-        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
-        "completion_tokens": int(usage.get("completion_tokens") or 0),
-    }
+    result = await _call_model(model)
+    if has_cjk(result["content"]) or _tool_calls_have_cjk(result["tool_calls"]):
+        fallback = s.vllm_model_fallback
+        if fallback and fallback != model:
+            _log_cjk("retry", endpoint, model, len(result["content"]))
+            retry = await _call_model(fallback)
+            retry["prompt_tokens"] += result["prompt_tokens"]
+            retry["completion_tokens"] += result["completion_tokens"]
+            result = retry
+        if has_cjk(result["content"]) or _tool_calls_have_cjk(result["tool_calls"]):
+            _log_cjk("strip", endpoint, fallback if fallback and fallback != model else model, len(result["content"]))
+            result["content"] = strip_cjk(result["content"])
+            result["tool_calls"] = _strip_tool_calls(result["tool_calls"])
+    return result
 
 
 async def stream_chat_completion(
@@ -91,6 +154,8 @@ async def stream_chat_completion(
     max_tokens: int | None = None,
     temperature: float | None = None,
     enable_thinking: bool = False,
+    model: str | None = None,
+    endpoint: str = "/v1/chat/stream",
 ) -> AsyncIterator[str]:
     """يولّد أحداث SSE (data: {...}\\n\\n) متوافقة مع الواجهة وتطبيق منارة."""
     s = get_settings()
@@ -99,7 +164,7 @@ async def stream_chat_completion(
     temp = s.default_temperature if temperature is None else temperature
 
     payload: dict[str, Any] = {
-        "model": s.vllm_model_name,
+        "model": model or s.vllm_model_text,
         "messages": messages,
         "max_tokens": capped_tokens,
         "temperature": temp,
@@ -108,6 +173,7 @@ async def stream_chat_completion(
     }
 
     in_think_block = False
+    stripped_chars = 0
     try:
         async with _make_async_client(timeout=s.llm_timeout_seconds) as client:
             async with client.stream("POST", f"{s.vllm_base_url}/chat/completions", json=payload) as resp:
@@ -138,10 +204,16 @@ async def stream_chat_completion(
                     if in_think_block or not delta:
                         continue
                     safe_delta = sanitize_model_output(delta)
+                    if has_cjk(safe_delta):
+                        # لا يمكن إعادة التوليد بعد الإرسال: نحذف الحروف الدخيلة من كل delta
+                        stripped_chars += len(CJK_RE.findall(safe_delta))
+                        safe_delta = strip_cjk(safe_delta)
                     if not safe_delta:
                         continue
                     yield f"data: {json.dumps({'delta': safe_delta}, ensure_ascii=False)}\n\n"
         llm_circuit.record_success()
+        if stripped_chars:
+            _log_cjk("strip", endpoint, model or s.vllm_model_text, stripped_chars)
         yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
     except Exception as exc:
         llm_circuit.record_failure()

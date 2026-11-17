@@ -37,6 +37,12 @@ class MetricsRegistry:
         self.rate_limited_total: int = 0
         self.latency_sum_ms: dict[str, float] = {}
         self.latency_count: dict[str, int] = {}
+        self.cjk_guard_total: dict[tuple[str, str], int] = {}
+
+    def inc_cjk_guard(self, action: str, endpoint: str) -> None:
+        with self._lock:
+            key = (action, endpoint or "unknown")
+            self.cjk_guard_total[key] = self.cjk_guard_total.get(key, 0) + 1
 
     def reset(self) -> None:
         with self._lock:
@@ -46,6 +52,7 @@ class MetricsRegistry:
             self.rate_limited_total = 0
             self.latency_sum_ms.clear()
             self.latency_count.clear()
+            self.cjk_guard_total.clear()
 
     def observe(
         self,
@@ -102,6 +109,14 @@ class MetricsRegistry:
             ])
             for ep, cnt in sorted(self.latency_count.items()):
                 lines.append(f'orchestrator_latency_ms_count{{endpoint="{ep}"}} {cnt}')
+
+        lines.extend([
+            "# HELP cjk_guard_total CJK stray-character guard actions (retry with fallback model / strip)",
+            "# TYPE cjk_guard_total counter",
+        ])
+        with self._lock:
+            for (action, endpoint), count in sorted(self.cjk_guard_total.items()):
+                lines.append(f'cjk_guard_total{{action="{action}",endpoint="{endpoint}"}} {count}')
 
         lines.extend([
             "# HELP orchestrator_circuit_breaker_state Circuit breaker state (0=CLOSED, 1=HALF_OPEN, 2=OPEN)",

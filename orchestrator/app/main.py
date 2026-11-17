@@ -9,6 +9,7 @@
 """
 import base64
 import json
+import secrets
 import time
 from typing import Any
 
@@ -17,12 +18,14 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent_backend import Principal
-from .agent_tools import confirm_tool_call, execute_tool_call, specs_for
+from .agent_tools import TOOLS, confirm_tool_call, execute_tool_call, specs_for
 from .config import get_settings
-from .llm_client import chat_completion, check_vllm_ready, stream_chat_completion
+from .llm_client import chat_completion, check_vllm_ready, stream_chat_completion, strip_cjk
+from .arabic import fix_arabic_counts
 from .observability import log_structured_event, metrics
 from .prompts_loader import registry
 from .rate_limit import rate_limiter
+from .screens import reset_slots, route_message
 from .resilience import CircuitBreakerOpenError, llm_circuit, stt_circuit
 from .security import (
     ServiceCaller,
@@ -30,6 +33,8 @@ from .security import (
     sanitize_user_input,
     scrub_sensitive_dict,
     verify_service_key,
+    wrap_tool_result,
+    wrap_tool_result_ex,
 )
 from .stt_client import check_stt_ready, transcribe_audio
 
@@ -91,6 +96,12 @@ class AgentTurnRequest(BaseModel):
     halaqat_ids: list[str] = Field(default_factory=list)
 
 
+class AgentChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    session_id: str = Field(default="")
+    halaqat_ids: list[str] = Field(default_factory=list)
+
+
 class ConfirmRequest(BaseModel):
     token: str = Field(..., min_length=1)
     utterance: str = Field(..., min_length=1, max_length=500)
@@ -142,7 +153,9 @@ def _build_principal(
     x_user_jwt: str = "",
     halaqat_ids: list[str] | None = None,
 ) -> Principal:
-    forward_headers: dict[str, str] = {}
+    forward_headers: dict[str, str] = {
+        "X-Forwarded-Proto": "https",
+    }
     if x_user_jwt:
         forward_headers["Authorization"] = (
             x_user_jwt if x_user_jwt.startswith("Bearer ") else f"Bearer {x_user_jwt}"
@@ -202,6 +215,8 @@ async def v1_chat(req: ChatRequest, caller: ServiceCaller = Depends(verify_servi
             max_tokens=max_tok,
             temperature=temp,
             enable_thinking=use_thinking,
+            model=settings.vllm_model_text,
+            endpoint="/v1/chat",
         )
         latency_ms = (time.monotonic() - t0) * 1000
         log_structured_event(
@@ -293,6 +308,8 @@ async def v1_chat_stream(req: ChatRequest, caller: ServiceCaller = Depends(verif
             max_tokens=max_tok,
             temperature=temp,
             enable_thinking=use_thinking,
+            model=settings.vllm_model_text,
+            endpoint="/v1/chat/stream",
         ),
         media_type="text/event-stream",
     )
@@ -328,6 +345,8 @@ async def v1_evaluation_note(req: EvaluationNoteRequest, caller: ServiceCaller =
             max_tokens=tpl.max_tokens,
             temperature=tpl.temperature,
             enable_thinking=False,
+            model=get_settings().vllm_model_evaluation_note or get_settings().vllm_model_text,
+            endpoint="/v1/evaluation-note",
         )
         log_structured_event(
             endpoint="/v1/evaluation-note",
@@ -396,6 +415,8 @@ async def v1_report_insight(req: ReportInsightRequest, caller: ServiceCaller = D
             max_tokens=tpl.max_tokens,
             temperature=tpl.temperature,
             enable_thinking=False,
+            model=get_settings().vllm_model_report_insight or get_settings().vllm_model_text,
+            endpoint="/v1/report-insight",
         )
         log_structured_event(
             endpoint="/v1/report-insight",
@@ -458,6 +479,8 @@ async def v1_quiz_generate(req: QuizGenerateRequest, caller: ServiceCaller = Dep
             max_tokens=tpl.max_tokens,
             temperature=tpl.temperature,
             enable_thinking=tpl.enable_thinking,
+            model=get_settings().vllm_model_text,
+            endpoint="/v1/quiz-generate",
         )
         log_structured_event(
             endpoint="/v1/quiz-generate",
@@ -555,6 +578,239 @@ def v1_confirm_tool(
     return out
 
 
+SESSION_MAX_TURNS = 8
+SESSION_TTL_SECONDS = 1800  # 30 دقيقة
+
+_chat_sessions: dict[str, dict[str, Any]] = {}
+
+
+def _get_chat_history(session_key: str) -> list[dict[str, Any]]:
+    now = time.time()
+    expired = [k for k, v in _chat_sessions.items() if now - v.get("updated_at", 0) > SESSION_TTL_SECONDS]
+    for k in expired:
+        _chat_sessions.pop(k, None)
+
+    entry = _chat_sessions.get(session_key)
+    if not entry:
+        return []
+    if now - entry.get("updated_at", 0) > SESSION_TTL_SECONDS:
+        _chat_sessions.pop(session_key, None)
+        return []
+    return list(entry.get("messages", []))
+
+
+def _save_chat_turn(session_key: str, user_msg: str, assistant_msg: str) -> None:
+    now = time.time()
+    entry = _chat_sessions.setdefault(session_key, {"messages": [], "updated_at": now})
+    entry["updated_at"] = now
+    msgs = entry.setdefault("messages", [])
+    msgs.append({"role": "user", "content": user_msg})
+    msgs.append({"role": "assistant", "content": assistant_msg})
+    max_msgs = SESSION_MAX_TURNS * 2
+    if len(msgs) > max_msgs:
+        entry["messages"] = msgs[-max_msgs:]
+
+
+def reset_chat_sessions() -> None:
+    global _chat_sessions
+    _chat_sessions.clear()
+    reset_slots()
+
+
+@app.post("/v1/agent/chat")
+async def v1_agent_chat(
+    req: AgentChatRequest,
+    x_user_jwt: str = Header(default=""),
+    caller: ServiceCaller = Depends(verify_service_key),
+):
+    """
+    وكيل محادثة متعدد الأدوار لمنصة منارة:
+    - محادثة عامة + إجابة عن أسئلة المنصة اعتماداً على KB.
+    - حلقة أدوات (Tool loop) بحد أقصى 4 جولات للأدوات القرائية مع تنفيذ فوري عبر الباكند.
+    - فرض التأكيد المسبق (confirm_required) لأي أداة كتابية قبل التنفيذ.
+    - إدارة سجل المحادثة (آخر N=8 أدوار) دون حفظ أي نصوص محادثة في السجلات.
+    """
+    t0 = time.monotonic()
+    rate_limiter.check(caller)
+
+    session_id = req.session_id.strip() or secrets.token_hex(8)
+    session_key = f"{caller.tenant_id}:{caller.user_id}:{session_id}"
+
+    allowed_tools = specs_for(caller.role)
+    try:
+        tpl = registry.get("agent_chat")
+    except KeyError:
+        tpl = registry.get("agent_tools")
+
+    clean_msg, flagged = sanitize_user_input(req.message, max_chars=1500)
+
+    # مسار حتمي لأوامر الواجهة (تنقل/نوافذ/خروج/جلسات/طالب) قبل النموذج
+    p = _build_principal(caller, x_user_jwt=x_user_jwt, halaqat_ids=req.halaqat_ids)
+    routed = route_message(p, (caller.role or "").upper(), clean_msg, session_key)
+    if routed:
+        _save_chat_turn(session_key, clean_msg, routed["answer"])
+        log_structured_event(
+            endpoint="/v1/agent/chat",
+            status_code=200,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            role=caller.role,
+            user_id=caller.user_id,
+            tenant_id=caller.tenant_id,
+            injection_flagged=flagged,
+            outcome="routed_ui_action",
+        )
+        return {
+            "answer": routed["answer"],
+            "ui_actions": routed["ui_actions"],
+            "tool_calls_made": [],
+            "confirm_required": None,
+            "session_id": session_id,
+        }
+
+    history = _get_chat_history(session_key)
+
+    current_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": tpl.system},
+        *history,
+        {"role": "user", "content": clean_msg},
+    ]
+
+    tool_calls_made: list[str] = []
+    confirm_required: dict[str, Any] | None = None
+    final_answer: str = ""
+
+    max_rounds = 4
+    res: dict[str, Any] = {}
+    content: str = ""
+    for round_idx in range(max_rounds):
+        try:
+            res = await chat_completion(
+                current_messages,
+                max_tokens=tpl.max_tokens,
+                temperature=tpl.temperature,
+                enable_thinking=False,
+                tools=allowed_tools,
+                model=get_settings().vllm_model_agent,
+                endpoint="/v1/agent/chat",
+            )
+        except Exception:
+            log_structured_event(
+                endpoint="/v1/agent/chat",
+                status_code=503,
+                latency_ms=(time.monotonic() - t0) * 1000,
+                role=caller.role,
+                user_id=caller.user_id,
+                tenant_id=caller.tenant_id,
+                prompt_id=tpl.id,
+                prompt_version=tpl.version,
+                injection_flagged=flagged,
+                outcome="fallback_unavailable",
+            )
+            return {
+                "answer": "المساعد الذكي غير متاح حالياً، يمكنك تكرار المحاولة لاحقاً.",
+                "tool_calls_made": tool_calls_made,
+                "confirm_required": None,
+                "session_id": session_id,
+            }
+
+        tool_calls = res.get("tool_calls") or []
+        content = res.get("content") or ""
+
+        if not tool_calls:
+            final_answer = sanitize_model_output(content)
+            break
+
+        first_call = tool_calls[0]
+        fn = first_call.get("function") or {}
+        tool_name = fn.get("name") or ""
+        call_id = first_call.get("id") or f"call_{round_idx}"
+        raw_args = fn.get("arguments") or "{}"
+        if isinstance(raw_args, str):
+            try:
+                parsed_args = json.loads(raw_args)
+            except ValueError:
+                parsed_args = {}
+        else:
+            parsed_args = raw_args
+
+        tool_calls_made.append(tool_name)
+
+        if tool_name == "ask_clarification":
+            final_answer = parsed_args.get("question_ar") or "هل يمكنك توضيح طلبك بمزيد من التفصيل؟"
+            break
+
+        tool_def = TOOLS.get(tool_name)
+        if not tool_def:
+            tool_err = {"status": "error", "message": f"الأداة {tool_name} غير مدعومة"}
+            current_messages.append({"role": "assistant", "content": content or "", "tool_calls": [first_call]})
+            current_messages.append({"role": "tool", "tool_call_id": call_id, "content": wrap_tool_result(tool_err)})
+            continue
+
+        if tool_def.write:
+            tool_res = execute_tool_call(p, tool_name, parsed_args)
+            if tool_res.get("status") == "confirm_required":
+                confirm_required = {
+                    "confirm_token": tool_res["confirm_token"],
+                    "tool": tool_name,
+                    "args": parsed_args,
+                    "speak": tool_res["speak"],
+                }
+                final_answer = tool_res["speak"]
+            elif tool_res.get("status") == "needs_clarification":
+                final_answer = tool_res.get("speak", "هل تعيد التوضيح؟")
+            else:
+                final_answer = tool_res.get("speak", "هل ترغب في تأكيد هذا الإجراء؟")
+            break
+
+        tool_res = execute_tool_call(p, tool_name, parsed_args)
+        if tool_res.get("status") == "needs_clarification":
+            final_answer = tool_res.get("speak", "هل تعيد التوضيح من فضلك؟")
+            break
+
+        payload = tool_res.get("result") if tool_res.get("status") == "ok" else tool_res
+        wrapped_res, tool_flagged = wrap_tool_result_ex(payload)
+        flagged = flagged or tool_flagged
+
+        current_messages.append({
+            "role": "assistant",
+            "content": content or "",
+            "tool_calls": [first_call],
+        })
+        current_messages.append({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": wrapped_res,
+        })
+
+    if not final_answer:
+        final_answer = sanitize_model_output(content or "تمت معالجة استفسارك.")
+
+    final_answer = fix_arabic_counts(strip_cjk(sanitize_model_output(final_answer)))
+    _save_chat_turn(session_key, clean_msg, final_answer)
+
+    log_structured_event(
+        endpoint="/v1/agent/chat",
+        status_code=200,
+        latency_ms=(time.monotonic() - t0) * 1000,
+        role=caller.role,
+        user_id=caller.user_id,
+        tenant_id=caller.tenant_id,
+        prompt_id=tpl.id,
+        prompt_version=tpl.version,
+        prompt_tokens=res.get("prompt_tokens", 0),
+        completion_tokens=res.get("completion_tokens", 0),
+        injection_flagged=flagged,
+        outcome="confirm_required" if confirm_required else "answered",
+    )
+
+    return {
+        "answer": final_answer,
+        "tool_calls_made": tool_calls_made,
+        "confirm_required": confirm_required,
+        "session_id": session_id,
+    }
+
+
 @app.post("/v1/agent/turn")
 async def v1_agent_turn(
     req: AgentTurnRequest,
@@ -567,6 +823,22 @@ async def v1_agent_turn(
     allowed_tools = specs_for(caller.role)
     tpl = registry.get("agent_tools")
     clean_utt, flagged = sanitize_user_input(req.utterance, max_chars=1500)
+
+    p = _build_principal(caller, x_user_jwt=x_user_jwt, halaqat_ids=req.halaqat_ids)
+    routed = route_message(p, (caller.role or "").upper(), clean_utt, f"{caller.tenant_id}:{caller.user_id}:turn")
+    if routed:
+        log_structured_event(
+            endpoint="/v1/agent/turn",
+            status_code=200,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            role=caller.role,
+            user_id=caller.user_id,
+            tenant_id=caller.tenant_id,
+            injection_flagged=flagged,
+            outcome="routed_ui_action",
+        )
+        return {"ai_available": True, "status": "ok", "speak": routed["answer"], "ui_actions": routed["ui_actions"]}
+
     messages = tpl.render_messages(utterance=clean_utt)
 
     try:
@@ -576,6 +848,8 @@ async def v1_agent_turn(
             temperature=tpl.temperature,
             enable_thinking=False,
             tools=allowed_tools,
+            model=get_settings().vllm_model_agent,
+            endpoint="/v1/agent/turn",
         )
     except Exception:
         log_structured_event(
@@ -615,7 +889,6 @@ async def v1_agent_turn(
     else:
         parsed_args = raw_args
 
-    p = _build_principal(caller, x_user_jwt=x_user_jwt, halaqat_ids=req.halaqat_ids)
     tool_result = execute_tool_call(p, tool_name, parsed_args)
 
     log_structured_event(

@@ -7,6 +7,7 @@
 """
 import hmac
 import html
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -50,9 +51,28 @@ _INJECTION_PATTERNS = [
     re.compile(r"انسَ\s+(كل\s+)?ما\s+سبق"),
 ]
 
+# أنماط إضافية خاصة بقيم نتائج الأدوات (بيانات غير موثوقة): تعليمات موجّهة للنموذج.
+# مقيّدة بعبارات صريحة كي لا تُحجب أسماء سليمة تحوي كلمة «تجاهل» في سياق عادي.
+_TOOL_INJECTION_PATTERNS = _INJECTION_PATTERNS + [
+    re.compile(r"تجاهل\s+(?:كل\s+|جميع\s+)?(?:ال)?(?:تعليمات|أوامر|اوامر|قواعد)"),
+    re.compile(r"(?:أخبر|اخبر|قل\s+ل)\s*(?:ـ)?\s*(?:ال)?مستخدم"),
+    re.compile(r"(?:ignore|disregard|forget)\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above|earlier)", re.IGNORECASE),
+    re.compile(r"you\s+are\s+now\b", re.IGNORECASE),
+    re.compile(r"(?:tell|inform)\s+the\s+user", re.IGNORECASE),
+]
+BLOCKED_CONTENT = "[محتوى محجوب]"
+
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _SCRIPT_OR_TAG_RE = re.compile(r"<\s*/?\s*(script|iframe|object|embed|style|link|meta|svg|on\w+)[^>]*>", re.IGNORECASE)
 _ANY_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# أنماط الكلمات السرية والتوكنات لحماية المخرجات
+_SECRET_PATTERNS = [
+    re.compile(r"(?i)\b(password|passwd|pwd|token|api[_-]?key|secret)\s*(?:is|هي)?\s*[:=]?\s*\S+"),
+    re.compile(r"(?i)\b(bearer\s+[a-zA-Z0-9_\-\.]{15,})"),
+    re.compile(r"كلمة\s*(?:المرور|السر)(?:\s+هي)?\s*[:=]?\s*\S+"),
+    re.compile(r"(?i)\b(eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{2,}\.[a-zA-Z0-9_-]+)\b"),
+]
 
 
 @dataclass
@@ -134,11 +154,84 @@ def sanitize_user_input(text: str, max_chars: int = 4000) -> tuple[str, bool]:
     return trimmed, flagged
 
 
+def filter_sensitive_tokens(text: str) -> str:
+    """إخفاء أو حذف أي كلمة مرور أو توكن قد يتسرب في رد النموذج."""
+    if not text:
+        return ""
+    cleaned = text
+    for pattern in _SECRET_PATTERNS:
+        cleaned = pattern.sub("[بيانات_محجوبة]", cleaned)
+    return cleaned
+
+
+def scrub_tool_text(value: str, max_chars: int = 200) -> tuple[str, bool]:
+    """
+    تعقيم قيمة نصية قادمة من أداة. عند رصد حقن تُقصّ القيمة عند أول موضع مطابق
+    (يُبقى ما قبله إن كان سليماً) وإلا تُستبدل كلها بـ [محتوى محجوب].
+    لا يبقى أي جزء من نص الحقن. يُرجع (النص، هل_رُصد_حقن).
+    """
+    text = redact_pii_text((value or "").strip()[:max_chars])
+    text = re.sub(r"</?\s*(?:user_input|tool_result)\s*>", "", text, flags=re.IGNORECASE)
+    starts = [m.start() for pat in _TOOL_INJECTION_PATTERNS if (m := pat.search(text))]
+    flagged = bool(starts)
+    if flagged:
+        head = text[: min(starts)].strip().rstrip(".،,:;؛-–—!؟? \t\n")
+        text = head if len(re.findall(r"\w", head)) >= 2 else BLOCKED_CONTENT
+    return filter_sensitive_tokens(text), flagged
+
+
+def scrub_tool_result_ex(result: Any) -> tuple[Any, bool]:
+    """نسخة تُرجع أيضاً علم رصد الحقن (للسجل فقط، بدون أي نص)."""
+    if isinstance(result, dict):
+        out, flagged = {}, False
+        for k, v in result.items():
+            k_lower = str(k).lower()
+            if k_lower in SENSITIVE_KEYS or "token" in k_lower or "password" in k_lower or "secret" in k_lower:
+                continue
+            if k_lower in {"notes", "comment", "raw_response", "extra_context", "description"}:
+                if isinstance(v, str):
+                    out[k], f = scrub_tool_text(v, max_chars=80)
+                    flagged = flagged or f
+                continue
+            out[k], f = scrub_tool_result_ex(v)
+            flagged = flagged or f
+        return out, flagged
+    if isinstance(result, list):
+        items, flagged = [], False
+        for item in result[:20]:
+            c, f = scrub_tool_result_ex(item)
+            items.append(c)
+            flagged = flagged or f
+        return items, flagged
+    if isinstance(result, str):
+        return scrub_tool_text(result, max_chars=200)
+    return result, False
+
+
+def scrub_tool_result(result: Any) -> Any:
+    """
+    تجهيز نتيجة الأداة للنموذج: إزالة الحقول الحساسة، تقليص الحقول الحرة،
+    قصّ/حجب أي قيمة تحوي تعليمة حقن، وسقف 20 سجلاً.
+    """
+    return scrub_tool_result_ex(result)[0]
+
+
+def wrap_tool_result_ex(result: Any) -> tuple[str, bool]:
+    cleaned, flagged = scrub_tool_result_ex(result)
+    return f"<tool_result>\n{json.dumps(cleaned, ensure_ascii=False)}\n</tool_result>", flagged
+
+
+def wrap_tool_result(result: Any) -> str:
+    """لف نتيجة الأداة بوسم <tool_result> بعد تعقيمها وإزالة الحقول الحرة."""
+    return wrap_tool_result_ex(result)[0]
+
+
 def sanitize_model_output(text: str) -> str:
     """
     تعقيم مخرجات النموذج قبل إرجاعها للتطبيق:
     - إزالة كتل <think>...</think> إن ظهرت
     - إزالة وسوم HTML/XSS الخطرة وتعقيم النص
+    - حجب وتصفية كلمات المرور والتوكنات السرية
     """
     if not text:
         return ""
@@ -146,6 +239,7 @@ def sanitize_model_output(text: str) -> str:
     cleaned = _SCRIPT_OR_TAG_RE.sub("", cleaned)
     cleaned = _ANY_HTML_TAG_RE.sub("", cleaned)
     cleaned = html.unescape(cleaned)
+    cleaned = filter_sensitive_tokens(cleaned)
     # إعادة التأكد من عدم بقاء أي أقواس وسوم HTML قابلة للتنفيذ في المتصفح
     cleaned = cleaned.replace("<", "‹").replace(">", "›")
     return cleaned.strip()

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Bell, CaretDown, Users, CalendarBlank, FilePdf } from '@phosphor-icons/react';
 import { getHalaqat, getSessions, startSession } from '../../../services/api/tenantService';
 import { useAuthContext } from '../../../context/AuthContext';
@@ -9,6 +9,7 @@ import AlternativeDatePickerModal from '../../../components/AlternativeDatePicke
 const TeacherSessions = () => {
     const { ringId } = useParams();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { user } = useAuthContext();
 
     const today = new Date();
@@ -135,6 +136,16 @@ const TeacherSessions = () => {
     const handleNewSession = () => {
         executeStartSession(null);
     };
+
+    // طلب من مساعد منارة بعد تأكيد المعلم: ?new=1 يبدأ جلسة جديدة مرة واحدة ثم يزيل المعامل
+    useEffect(() => {
+        if (searchParams.get('new') !== '1' || !selectedRingId || loading) return;
+        const next = new URLSearchParams(searchParams);
+        next.delete('new');
+        setSearchParams(next, { replace: true });
+        executeStartSession(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams, selectedRingId, loading]);
 
     const handleSelectAlternativeDate = (chosenDate) => {
         executeStartSession(chosenDate);

@@ -11,7 +11,13 @@ PROMPTS_DIR = Path(os.getenv("PROMPTS_DIR", str(BASE_DIR / "prompts")))
 class Settings:
     service_key: str = ""
     vllm_base_url: str = ""
-    vllm_model_name: str = "base"
+    vllm_model_name: str = "base"  # للتوافق: قيمة AGENT الافتراضية إن لم يُضبط VLLM_MODEL_AGENT
+    vllm_model_agent: str = "manarasy"
+    vllm_model_text: str = "base"
+    vllm_model_fallback: str = "base"
+    # نموذج كل نقطة نهاية قابل للضبط (تُستخدم للمقارنة A/B قبل تثبيت القرار)
+    vllm_model_evaluation_note: str = ""   # فارغ = TEXT
+    vllm_model_report_insight: str = ""    # فارغ = TEXT
     stt_base_url: str = ""
     stt_model_name: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
 
@@ -44,6 +50,11 @@ class Settings:
             service_key=os.getenv("ORCHESTRATOR_SERVICE_KEY", ""),
             vllm_base_url=os.getenv("VLLM_BASE_URL", "http://100.119.62.40:8000/v1").rstrip("/"),
             vllm_model_name=os.getenv("VLLM_MODEL_NAME", "base"),
+            vllm_model_agent=os.getenv("VLLM_MODEL_AGENT") or os.getenv("VLLM_MODEL_NAME") or "manarasy",
+            vllm_model_text=os.getenv("VLLM_MODEL_TEXT", "base"),
+            vllm_model_fallback=os.getenv("VLLM_MODEL_FALLBACK", "base"),
+            vllm_model_evaluation_note=os.getenv("VLLM_MODEL_EVALUATION_NOTE", ""),
+            vllm_model_report_insight=os.getenv("VLLM_MODEL_REPORT_INSIGHT", ""),
             stt_base_url=os.getenv("STT_BASE_URL", "http://100.119.62.40:8001/v1").rstrip("/"),
             stt_model_name=os.getenv("STT_MODEL_NAME", "deepdml/faster-whisper-large-v3-turbo-ct2"),
             agent_backend=os.getenv("AGENT_BACKEND", "mock"),

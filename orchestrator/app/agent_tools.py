@@ -68,6 +68,69 @@ def resolve_student(p: Principal, query: str) -> dict:
     return scrub_sensitive_dict(good[0][2])
 
 
+def resolve_halaqa(p: Principal, query: str) -> dict:
+    """يحل اسم الحلقة المنطوق إلى حلقة ضمن نطاق المستخدم بدون تخمين."""
+    q = normalize(query)
+    if not q:
+        raise NeedClarification("اسم الحلقة", "لم أفهم اسم الحلقة، هل تعيد الاسم من فضلك؟")
+    token = normalize("حلقة")
+    q_core = q.replace(token, "").strip() or q
+    halaqat = get_backend().halaqat(p)
+    if not halaqat:
+        raise NeedClarification(query, "لا توجد حلقات متاحة ضمن نطاقك.")
+    scored = []
+    for h in halaqat:
+        h_norm = normalize(h["name"])
+        h_core = h_norm.replace(token, "").strip() or h_norm
+        score = SequenceMatcher(None, q_core, h_core).ratio()
+        if q_core in h_core.split() or h_core in q_core.split():
+            score = max(score, 0.8)
+        scored.append((score, h["id"], h))
+
+    scored.sort(key=lambda x: -x[0])
+    good = [x for x in scored if x[0] >= 0.6]
+    if not good:
+        raise NeedClarification(query, f"لم أجد حلقة باسم «{query}» ضمن نطاقك، هل تعيد الاسم؟")
+    if len(good) > 1 and good[0][0] - good[1][0] < 0.15:
+        names = [x[2]["name"] for x in good[:2]]
+        raise NeedClarification(query, f"تقصد {names[0]} أم {names[1]}؟", names)
+    return good[0][2]
+
+
+def list_students(p: Principal, a: dict):
+    h = resolve_halaqa(p, a["halaqa_query"])
+    students = get_backend().list_students(p, h["id"])
+    return scrub_sensitive_dict(students)
+
+
+def attendance_report(p: Principal, a: dict):
+    period = a.get("period", "week")
+    student_query = a.get("student_query")
+    halaqa_query = a.get("halaqa_query")
+    if student_query:
+        s = resolve_student(p, student_query)
+        rep = get_backend().attendance_report(p, student_id=s["id"], period=period)
+        return scrub_sensitive_dict(rep)
+    if halaqa_query:
+        h = resolve_halaqa(p, halaqa_query)
+        rep = get_backend().attendance_report(p, halaqa_id=h["id"], period=period)
+        return scrub_sensitive_dict(rep)
+    raise NeedClarification("اسم الطالب أو الحلقة", "هل ترغب في تقرير الحضور لطالب محدد أم لحلقة كاملة؟")
+
+
+def recitation_history(p: Principal, a: dict):
+    s = resolve_student(p, a["student_query"])
+    limit = int(a.get("limit") or 5)
+    hist = get_backend().recitation_history(p, s["id"], limit=limit)
+    return scrub_sensitive_dict(hist)
+
+
+def points_history(p: Principal, a: dict):
+    s = resolve_student(p, a["student_query"])
+    hist = get_backend().points_history(p, s["id"])
+    return scrub_sensitive_dict(hist)
+
+
 def list_halaqat(p: Principal, a: dict):
     return scrub_sensitive_dict(get_backend().halaqat(p))
 
@@ -188,6 +251,45 @@ TOOLS: dict[str, Tool] = {
             True,
             approve_registration,
             lambda p, a: f"سأعتمد طلب التسجيل رقم {a['request_id']}",
+        ),
+        Tool(
+            "list_students",
+            "عرض طلاب حلقة",
+            _obj({"halaqa_query": {"type": "string", "description": "اسم الحلقة"}}, ["halaqa_query"]),
+            _BOTH,
+            False,
+            list_students,
+        ),
+        Tool(
+            "attendance_report",
+            "تقرير حضور طالب أو حلقة لفترة",
+            _obj(
+                {
+                    "student_query": _SQ,
+                    "halaqa_query": {"type": "string"},
+                    "period": {"type": "string", "enum": ["week", "month"]},
+                },
+                ["period"],
+            ),
+            _BOTH,
+            False,
+            attendance_report,
+        ),
+        Tool(
+            "recitation_history",
+            "آخر تقييمات التسميع لطالب",
+            _obj({"student_query": _SQ, "limit": {"type": "integer"}}, ["student_query"]),
+            _BOTH,
+            False,
+            recitation_history,
+        ),
+        Tool(
+            "points_history",
+            "سجل نقاط طالب",
+            _obj({"student_query": _SQ}, ["student_query"]),
+            _BOTH,
+            False,
+            points_history,
         ),
     ]
 }
