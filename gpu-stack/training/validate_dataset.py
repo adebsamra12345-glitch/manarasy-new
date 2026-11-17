@@ -29,34 +29,36 @@ def validate_file(path: Path, golden_utterances: set[str]) -> tuple[int, int]:
     for idx, line in enumerate(lines, 1):
         row = json.loads(line)
         msgs = row.get("messages") or []
-        assert len(msgs) == 3, f"{path.name}:{idx} must have 3 messages (system, user, assistant)"
+        assert len(msgs) >= 3 and len(msgs) % 2 == 1, f"{path.name}:{idx} unexpected message count {len(msgs)}"
         assert msgs[0]["role"] == "system"
-        assert msgs[1]["role"] == "user"
-        assert msgs[2]["role"] == "assistant"
+        assert msgs[-1]["role"] == "assistant"
 
-        # فحص عدم تسرب أي جملة من التقييم الذهبي
-        user_text = msgs[1]["content"]
-        for g_utt in golden_utterances:
-            assert g_utt not in user_text, f"Data leakage detected in {path.name}:{idx}: {g_utt}"
+        # فحص عدم تسرب أي جملة من التقييم الذهبي (كل أدوار المستخدم)
+        for m in msgs:
+            if m["role"] == "user":
+                for g_utt in golden_utterances:
+                    assert g_utt not in m["content"], f"Data leakage detected in {path.name}:{idx}: {g_utt}"
 
-        # فحص خلو مخرجات المساعد من <think> أو <script>
-        assistant_content = msgs[2].get("content") or ""
-        assert "<think>" not in assistant_content.lower(), f"<think> found in {path.name}:{idx}"
-        assert "<script>" not in assistant_content.lower(), f"<script> found in {path.name}:{idx}"
+        for m in msgs:
+            if m["role"] != "assistant":
+                continue
+            # فحص خلو مخرجات المساعد من <think> أو <script>
+            assistant_content = m.get("content") or ""
+            assert "<think>" not in assistant_content.lower(), f"<think> found in {path.name}:{idx}"
+            assert "<script>" not in assistant_content.lower(), f"<script> found in {path.name}:{idx}"
 
-        # فحص مطابقة JSON Schema لأدوات الوكيل
-        tcalls = msgs[2].get("tool_calls") or []
-        for tc in tcalls:
-            fn = tc["function"]
-            tname = fn["name"]
-            targs = json.loads(fn["arguments"])
-            if tname == "ask_clarification":
-                schema = CLARIFY_SPEC["function"]["parameters"]
-            else:
-                assert tname in TOOLS, f"Unknown tool '{tname}' in {path.name}:{idx}"
-                schema = TOOLS[tname].parameters
-            jsonschema.validate(targs, schema)
-            tool_calls_validated += 1
+            # فحص مطابقة JSON Schema لأدوات الوكيل
+            for tc in m.get("tool_calls") or []:
+                fn = tc["function"]
+                tname = fn["name"]
+                targs = json.loads(fn["arguments"])
+                if tname == "ask_clarification":
+                    schema = CLARIFY_SPEC["function"]["parameters"]
+                else:
+                    assert tname in TOOLS, f"Unknown tool '{tname}' in {path.name}:{idx}"
+                    schema = TOOLS[tname].parameters
+                jsonschema.validate(targs, schema)
+                tool_calls_validated += 1
 
         valid_count += 1
 
