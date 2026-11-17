@@ -15,6 +15,7 @@ services:
     restart: unless-stopped
     environment:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - PYTHONPATH=/plugins
     command: >
       --model /models/Qwen3-8B
       --served-model-name base
@@ -27,12 +28,14 @@ services:
       --default-chat-template-kwargs '{"enable_thinking": false}'
       --enable-lora
       --max-lora-rank 32
+      --logits-processors cjk_ban:CjkBanLogitsProcessor
       ${LORA_ARGS:-}
     ports:
       - "${TS_IP:?يجب ضبط TS_IP بعنوان Tailscale حصراً}:8000:8000"
     volumes:
       - "${MODELS_DIR:?يجب ضبط مسار النماذج MODELS_DIR}:/models:ro"
       - "./loras:/loras"
+      - "./vllm_plugins:/plugins:ro"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 10s
