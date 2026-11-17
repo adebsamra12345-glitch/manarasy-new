@@ -209,12 +209,12 @@ def open_screen_tool(p: Principal, args: dict) -> dict:
 
 
 # ─── كشف النوايا ─────────────────────────────────────────────────────────────
-_RE_LOGOUT = re.compile(r"(تسجيل الخروج|سجل خروجي|سجلني خروج|سجل خروج|اخرجني|خروج من الحساب|خروج|logout|sign out)")
-_RE_PASSWORD = re.compile(r"(كلمه المرور|كلمه السر|الرقم السري|الباسورد|باسورد|password)")
+_RE_LOGOUT = re.compile(r"(تسجيل الخروج|سكر(لي|ني)? (ال)?حساب|اطلعني من (ال)?حساب|طلعني من (ال)?حساب|سجل خروجي|سجلني خروج|سجل خروج|اخرجني|خروج من الحساب|خروج|logout|sign out)")
+_RE_PASSWORD = re.compile(r"(كلمه المرور|كلمه السر|كلمه مرور|الرقم السري|الرمز السري|الرمز|الباسورد|باسورد|password)")
 _RE_PASSWORD_CHANGE = re.compile(r"(تغيير|غير|اغير|تعديل|عدل|تحديث|نسيت|ضاعت|استرجاع|استعاده|اعاده تعيين|ساعد|مساعده|نافذه)")
 _RE_NEW_SESSION = re.compile(r"(جلسه (تسميع )?جديده|ابدا جلسه|ابدء جلسه|بدء جلسه|ابدا تسميع)")
 _RE_PREV_SESSIONS = re.compile(r"(الجلسات السابقه|جلسات سابقه|جلسات الحلقه|سجل الجلسات|جلسات حلقه)")
-_RE_STUDENT_INFO = re.compile(r"(معلومات|بيانات|ملف|نشاط|تفاصيل) (ال)?طالب")
+_RE_STUDENT_INFO = re.compile(r"(معلومات|بيانات|ملف|نشاط|تفاصيل|ورقه معلومات|بطاقه|بطاقه معلومات|صفحه) (عن |ال)?طالب")
 
 
 def _extract_after(text: str, markers: tuple[str, ...]) -> str:
@@ -249,6 +249,9 @@ def route_message(p: Principal, role: str, message: str, session_key: str) -> di
         or _RE_PREV_SESSIONS.search(norm) or _RE_STUDENT_INFO.search(norm)
         or (raw_words & _NAV_VERBS and match_screen(tokens))
     )
+    if slot and not explicit and (len(tokens) > 4 or is_question):
+        _slot_del(session_key)  # جملة جديدة طويلة/سؤال: ليست جواباً عن سؤال المعامل الناقص
+        slot = None
     if slot and not explicit:
         if parse_confirmation(message) == "no" and len(tokens) <= 2:
             _slot_del(session_key)

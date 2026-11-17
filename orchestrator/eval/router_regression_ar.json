@@ -779,6 +779,83 @@
    "expect": {
     "passthrough": true
    }
+  },
+  {
+   "id": "V5-LOGOUT-6",
+   "role": "TEACHER",
+   "steps": [
+    "اطلعني من الحساب"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "V5-LOGOUT-7",
+   "role": "TEACHER",
+   "steps": [
+    "سكر الحساب"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "V5-PWD-3",
+   "role": "TEACHER",
+   "steps": [
+    "بدي غير الرمز السري"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ],
+    "choice_kinds": [
+     "reply",
+     "open_modal"
+    ]
+   }
+  },
+  {
+   "id": "V5-NAV-1",
+   "role": "CENTER_MANAGER",
+   "steps": [
+    "افتح لي تبويب نقاط الطلاب"
+   ],
+   "expect": {
+    "navigate": "/center-manager/rewards"
+   }
+  },
+  {
+   "id": "V5-NAV-2",
+   "role": "TEACHER",
+   "steps": [
+    "افتح لي صفحة الطلبة"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "V5-SLOT-1",
+   "role": "TEACHER",
+   "steps": [
+    "الجلسات السابقة",
+    "ما هي الحلقات المتاحة لي؟"
+   ],
+   "expect": {
+    "passthrough": true
+   }
   }
  ]
 }

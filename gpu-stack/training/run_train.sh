@@ -91,7 +91,7 @@ docker run --rm --gpus all \
   --max-vram-fraction "$MAX_VRAM_FRACTION" \
   --train-file "$TRAIN_FILE" --val-file "$VAL_FILE" \
   --output-dir "loras/${ADAPTER_NAME}" \
-  --lr "$LR" --epochs "$EPOCHS"
+  --lr "$LR" --epochs "$EPOCHS" --max-seq-len "${MAX_SEQ_LEN:-1024}"
 
 echo "✅ الخطوة 4/4: اكتمل التدريب وحُفظ المحوّل في $STACK_DIR/loras/${ADAPTER_NAME}"
 
