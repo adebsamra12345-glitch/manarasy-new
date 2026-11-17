@@ -1,3 +1,4 @@
+import uuid
 import logging
 from decimal import Decimal
 from django.db import transaction
@@ -45,113 +46,174 @@ class PointsService:
         }
 
     @staticmethod
-    def grant_behavioral_bonus(db_name: str, student_id: str, performed_by: UserProfile, reason: str):
+    def record_transaction(
+        db_name: str,
+        student_id: str,
+        amount: int,
+        transaction_type: str,
+        reason: str,
+        performed_by: UserProfile = None,
+        idempotency_key: str = None,
+        reference_id: str = None,
+        reference_type: str = None,
+        metadata: dict = None
+    ) -> PointTransaction:
         """
-        منح مكافأة سلوكية للطالب بقيمة (+1) نقطة لسلوك ممتاز.
-        يتم تنفيذ العملية بشكل ذري وتسجيل الرصيد قبل وبعد مع كشف الحساب.
+        المحرك المحاسبي الموحد لتسجيل حركات دفتر الأستاذ (Append-Only Ledger Engine):
+        1. فحص مفتاح التفرد (Idempotency) لمنع تكرار أي معاملة عند انقطاع الشبكة أو إعادة الإرسال.
+        2. معاملة ذرية كاملة transaction.atomic(using=db_name).
+        3. قفل متشائم select_for_update() على سجل الطالب لضمان التزامن ومنع Lost Updates.
+        4. فحص الرصيد الكافي ومنع الأرصدة السالبة عند الخصم.
+        5. تحديث رصيد الطالب الكاش وتوثيق الرصيد قبل وبعد بدقة تامة.
+        6. إنشاء قيد الدفتر المحاسبي PointTransaction غير القابل للتعديل.
+        """
+        if not reason or not reason.strip():
+            raise ValueError("يجب تحديد سبب الحركة المالية في دفتر الأستاذ")
+
+        if amount == 0:
+            raise ValueError("لا يمكن تسجيل حركة بقيمة صفر نقاط")
+
+        # 1. Idempotency Pre-flight Check (Outside transaction for performance)
+        if idempotency_key:
+            existing_tx = PointTransaction.objects.using(db_name).filter(
+                student_id=student_id,
+                idempotency_key=idempotency_key
+            ).first()
+            if existing_tx:
+                logger.info(f"[Idempotency Hit] Returning existing transaction {existing_tx.id} for key {idempotency_key}")
+                return existing_tx
+
+        with transaction.atomic(using=db_name):
+            # 2. In-Lock Idempotency Check (Guard against concurrent identical requests)
+            if idempotency_key:
+                existing_tx = PointTransaction.objects.using(db_name).select_for_update().filter(
+                    student_id=student_id,
+                    idempotency_key=idempotency_key
+                ).first()
+                if existing_tx:
+                    logger.info(f"[In-Lock Idempotency Hit] Returning existing transaction {existing_tx.id} for key {idempotency_key}")
+                    return existing_tx
+
+            # 3. Lock Student Row (Enforcing Lock Hierarchy: Student first)
+            try:
+                student = Student.objects.using(db_name).select_for_update().get(id=student_id)
+            except Student.DoesNotExist:
+                raise ValueError("الطالب المحدد غير موجود")
+
+            balance_before = student.points
+            balance_after = balance_before + amount
+
+            # 4. Strict Non-negative Balance Enforcement
+            if balance_after < 0:
+                raise ValueError(
+                    f"رصيد الطالب الحالي ({balance_before} نقطة) غير كافٍ لإتمام العملية (المطلوب خصم {abs(amount)} نقطة)"
+                )
+
+            # 5. Atomic Update of Cached Balance
+            student.points = balance_after
+            student.save(using=db_name, update_fields=['points'])
+
+            # 6. Append-Only Entry in Ledger
+            tx = PointTransaction.objects.using(db_name).create(
+                student=student,
+                amount=amount,
+                transaction_type=transaction_type,
+                reason=reason.strip(),
+                balance_before=balance_before,
+                balance_after=balance_after,
+                performed_by=performed_by,
+                idempotency_key=idempotency_key,
+                reference_id=str(reference_id) if reference_id else None,
+                reference_type=reference_type,
+                metadata=metadata or {}
+            )
+            return tx
+
+    @staticmethod
+    def grant_behavioral_bonus(db_name: str, student_id: str, performed_by: UserProfile, reason: str, idempotency_key: str = None):
+        """
+        منح مكافأة سلوكية للطالب بقيمة (+1) نقطة لسلوك ممتاز عبر محرك الدفتر المركزي.
         """
         if not reason or not reason.strip():
             raise ValueError("يجب تحديد سبب المكافأة السلوكية")
 
-        # تقييم ممتاز سلوكياً يمنح نقطة واحدة
         BONUS_AMOUNT = 1
 
-        with transaction.atomic(using=db_name):
-            try:
-                student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=student_id)
-            except Student.DoesNotExist:
-                raise ValueError("الطالب المحدد غير موجود")
+        tx = PointsService.record_transaction(
+            db_name=db_name,
+            student_id=student_id,
+            amount=BONUS_AMOUNT,
+            transaction_type='BEHAVIORAL_BONUS',
+            reason=reason.strip(),
+            performed_by=performed_by,
+            idempotency_key=idempotency_key
+        )
 
-            balance_before = student.points
-            balance_after = balance_before + BONUS_AMOUNT
-            
-            student.points = balance_after
-            student.save(using=db_name, update_fields=['points'])
-
-            tx = PointTransaction.objects.using(db_name).create(
+        try:
+            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+            student = Student.objects.using(db_name).get(id=student_id)
+            StudentNotificationService.notify_points_awarded(
+                db_name=db_name,
                 student=student,
                 amount=BONUS_AMOUNT,
-                transaction_type='BEHAVIORAL_BONUS',
                 reason=reason.strip(),
-                balance_before=balance_before,
-                balance_after=balance_after,
-                performed_by=performed_by
+                balance_after=tx.balance_after
             )
-            
-            try:
-                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
-                StudentNotificationService.notify_points_awarded(
-                    db_name=db_name,
-                    student=student,
-                    amount=BONUS_AMOUNT,
-                    reason=reason.strip(),
-                    balance_after=balance_after
-                )
-            except Exception as notify_err:
-                logger.warning(f"Failed to notify points award: {notify_err}")
+        except Exception as notify_err:
+            logger.warning(f"Failed to notify points award: {notify_err}")
 
-            return {
-                "success": True,
-                "student_id": str(student.id),
-                "student_name": student.full_name,
-                "awarded_points": BONUS_AMOUNT,
-                "balance_before": balance_before,
-                "balance_after": balance_after,
-                "transaction_id": str(tx.id),
-                "created_at": tx.created_at.isoformat()
-            }
+        return {
+            "success": True,
+            "student_id": str(tx.student_id),
+            "student_name": tx.student.full_name,
+            "awarded_points": BONUS_AMOUNT,
+            "balance_before": tx.balance_before,
+            "balance_after": tx.balance_after,
+            "transaction_id": str(tx.id),
+            "created_at": tx.created_at.isoformat()
+        }
 
     @staticmethod
-    def award_recitation_pages_points(db_name: str, student_id: str, performed_by: UserProfile = None, reason: str = ""):
+    def award_recitation_pages_points(db_name: str, student_id: str, performed_by: UserProfile = None, reason: str = "", idempotency_key: str = None):
         """
-        منح نقطتين (+2 نقاط) عند تسميع 3 صفحات بتقييم عالي.
+        منح نقطتين (+2 نقاط) عند تسميع 3 صفحات بتقييم عالي عبر محرك الدفتر المركزي.
         """
         RECITATION_BONUS = 2
+        rec_reason = reason or "مكافأة إتقان: تسميع 3 صفحات بتقييم عالي (+2 نقاط)"
 
-        with transaction.atomic(using=db_name):
-            try:
-                student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=student_id)
-            except Student.DoesNotExist:
-                raise ValueError("الطالب المحدد غير موجود")
+        tx = PointsService.record_transaction(
+            db_name=db_name,
+            student_id=student_id,
+            amount=RECITATION_BONUS,
+            transaction_type='RECITATION',
+            reason=rec_reason,
+            performed_by=performed_by,
+            idempotency_key=idempotency_key
+        )
 
-            balance_before = student.points
-            balance_after = balance_before + RECITATION_BONUS
-            
-            student.points = balance_after
-            student.save(using=db_name, update_fields=['points'])
-
-            tx = PointTransaction.objects.using(db_name).create(
+        try:
+            from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+            student = Student.objects.using(db_name).get(id=student_id)
+            StudentNotificationService.notify_points_awarded(
+                db_name=db_name,
                 student=student,
                 amount=RECITATION_BONUS,
-                transaction_type='RECITATION',
-                reason=reason or "مكافأة إتقان: تسميع 3 صفحات بتقييم عالي (+2 نقاط)",
-                balance_before=balance_before,
-                balance_after=balance_after,
-                performed_by=performed_by
+                reason=rec_reason,
+                balance_after=tx.balance_after
             )
+        except Exception as notify_err:
+            logger.warning(f"Failed to notify recitation points: {notify_err}")
 
-            try:
-                from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
-                StudentNotificationService.notify_points_awarded(
-                    db_name=db_name,
-                    student=student,
-                    amount=RECITATION_BONUS,
-                    reason=reason or "مكافأة إتقان: تسميع 3 صفحات بتقييم عالي (+2 نقاط)",
-                    balance_after=balance_after
-                )
-            except Exception as notify_err:
-                logger.warning(f"Failed to notify recitation points: {notify_err}")
-
-            return {
-                "success": True,
-                "student_id": str(student.id),
-                "student_name": student.full_name,
-                "awarded_points": RECITATION_BONUS,
-                "balance_before": balance_before,
-                "balance_after": balance_after,
-                "transaction_id": str(tx.id),
-                "created_at": tx.created_at.isoformat()
-            }
+        return {
+            "success": True,
+            "student_id": str(tx.student_id),
+            "student_name": tx.student.full_name,
+            "awarded_points": RECITATION_BONUS,
+            "balance_before": tx.balance_before,
+            "balance_after": tx.balance_after,
+            "transaction_id": str(tx.id),
+            "created_at": tx.created_at.isoformat()
+        }
 
     @staticmethod
     def create_reward_claim(db_name: str, student_id: str, reward_id: str, requested_by: UserProfile, notes: str = "", tenant_obj=None):
@@ -238,43 +300,35 @@ class PointsService:
         """
         with transaction.atomic(using=db_name):
             try:
-                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student__halaqa__center', 'reward').get(id=claim_id)
+                claim = RewardClaim.objects.using(db_name).select_for_update().get(id=claim_id)
             except RewardClaim.DoesNotExist:
                 raise ValueError("طلب المكافأة غير موجود")
 
             if claim.status not in ['PENDING']:
                 raise ValueError(f"لا يمكن الموافقة على طلب بحالته الحالية ({claim.get_status_display()})")
 
-            student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=claim.student_id)
             reward = Reward.objects.using(db_name).select_for_update().get(id=claim.reward_id)
-
-            if student.points < claim.points_spent:
-                raise ValueError(f"رصيد الطالب الحالي ({student.points} نقطة) غير كافٍ لإتمام الموافقة ({claim.points_spent} نقطة)")
 
             if reward.stock_quantity <= 0:
                 raise ValueError("المخزون المتاح من هذه المكافأة قد نفد")
 
-            # خصم النقاط
-            balance_before = student.points
-            balance_after = balance_before - claim.points_spent
-            student.points = balance_after
-            student.save(using=db_name, update_fields=['points'])
+            claim_idemp_key = f"claim_approval_{claim.id}"
+            tx = PointsService.record_transaction(
+                db_name=db_name,
+                student_id=str(claim.student_id),
+                amount=-claim.points_spent,
+                transaction_type='REWARD_REDEMPTION',
+                reason=f"موافقة على طلب مكافأة: {reward.name}",
+                performed_by=reviewed_by,
+                idempotency_key=claim_idemp_key,
+                reference_id=str(claim.id),
+                reference_type='REWARD_CLAIM'
+            )
 
             # خصم المخزون إن كان محدداً
             if reward.stock_quantity > 0:
                 reward.stock_quantity -= 1
                 reward.save(using=db_name, update_fields=['stock_quantity'])
-
-            # تسجيل الحركة في دفتر حركات النقاط
-            tx = PointTransaction.objects.using(db_name).create(
-                student=student,
-                amount=-claim.points_spent,
-                transaction_type='REWARD_REDEMPTION',
-                reason=f"موافقة على طلب مكافأة: {reward.name}",
-                balance_before=balance_before,
-                balance_after=balance_after,
-                performed_by=reviewed_by
-            )
 
             # تحديث حالة الطلب
             claim.status = 'APPROVED'
@@ -288,10 +342,10 @@ class PointsService:
                 from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
                 StudentNotificationService.notify_points_redemption(
                     db_name=db_name,
-                    student=student,
+                    student=tx.student,
                     points_spent=claim.points_spent,
                     reward_name=reward.name,
-                    balance_after=balance_after,
+                    balance_after=tx.balance_after,
                     is_approval=True
                 )
             except Exception as notify_err:
@@ -302,7 +356,7 @@ class PointsService:
                 "claim_id": str(claim.id),
                 "status": "APPROVED",
                 "status_display": "تمت الموافقة",
-                "balance_after": balance_after,
+                "balance_after": tx.balance_after,
                 "transaction_id": str(tx.id)
             }
 
@@ -313,7 +367,7 @@ class PointsService:
         """
         with transaction.atomic(using=db_name):
             try:
-                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student__halaqa__center', 'reward').get(id=claim_id)
+                claim = RewardClaim.objects.using(db_name).select_for_update().get(id=claim_id)
             except RewardClaim.DoesNotExist:
                 raise ValueError("طلب المكافأة غير موجود")
 
@@ -370,7 +424,7 @@ class PointsService:
 
         with transaction.atomic(using=db_name):
             try:
-                claim = RewardClaim.objects.using(db_name).select_for_update().select_related('student__halaqa__center', 'reward').get(id=claim_id)
+                claim = RewardClaim.objects.using(db_name).select_for_update().get(id=claim_id)
             except RewardClaim.DoesNotExist:
                 raise ValueError("طلب المكافأة غير موجود")
 
@@ -407,16 +461,13 @@ class PointsService:
             }
 
     @staticmethod
-    def redeem_reward(db_name: str, student_id: str, reward_id: str, performed_by: UserProfile, notes: str = ""):
+    def redeem_reward(db_name: str, student_id: str, reward_id: str, performed_by: UserProfile, notes: str = "", idempotency_key: str = None):
         """
-        استبدال فوري ومباشر لمكافأة للطالب (من قبل المعلم أو الأدمن).
+        استبدال فوري ومباشر لمكافأة للطالب عبر محرك الدفتر المركزي.
         """
-        with transaction.atomic(using=db_name):
-            try:
-                student = Student.objects.using(db_name).select_for_update().select_related('halaqa__center').get(id=student_id)
-            except Student.DoesNotExist:
-                raise ValueError("الطالب غير موجود")
+        key = idempotency_key or f"direct_redeem_{student_id}_{reward_id}_{uuid.uuid4().hex[:8]}"
 
+        with transaction.atomic(using=db_name):
             try:
                 reward = Reward.objects.using(db_name).select_for_update().get(id=reward_id)
             except Reward.DoesNotExist:
@@ -428,34 +479,27 @@ class PointsService:
             if reward.stock_quantity <= 0:
                 raise ValueError("نفدت الكمية المتاحة من هذه المكافأة")
 
-            if student.points < reward.points_cost:
-                raise ValueError(f"رصيد الطالب غير كافٍ ({student.points} نقطة)، والمطلوب {reward.points_cost} نقطة")
-
-            # خصم النقاط
-            balance_before = student.points
-            balance_after = balance_before - reward.points_cost
-            student.points = balance_after
-            student.save(using=db_name, update_fields=['points'])
+            # خصم النقاط عبر الدفتر المركزي مع قفل الطالب وفحص الرصيد
+            tx = PointsService.record_transaction(
+                db_name=db_name,
+                student_id=student_id,
+                amount=-reward.points_cost,
+                transaction_type='REWARD_REDEMPTION',
+                reason=f"استبدال مكافأة مباشر: {reward.name}",
+                performed_by=performed_by,
+                idempotency_key=key,
+                reference_id=str(reward.id),
+                reference_type='REWARD'
+            )
 
             # تحديث المخزون
             if reward.stock_quantity > 0:
                 reward.stock_quantity -= 1
                 reward.save(using=db_name, update_fields=['stock_quantity'])
 
-            # تسجيل الحركة المالية في دفتر النقاط
-            tx = PointTransaction.objects.using(db_name).create(
-                student=student,
-                amount=-reward.points_cost,
-                transaction_type='REWARD_REDEMPTION',
-                reason=f"استبدال مكافأة مباشر: {reward.name}",
-                balance_before=balance_before,
-                balance_after=balance_after,
-                performed_by=performed_by
-            )
-
             # إنشاء سجل المطالبة / التسليم
             claim = RewardClaim.objects.using(db_name).create(
-                student=student,
+                student_id=student_id,
                 reward=reward,
                 points_spent=reward.points_cost,
                 status='DELIVERED',
@@ -465,12 +509,13 @@ class PointsService:
 
             try:
                 from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                student = Student.objects.using(db_name).get(id=student_id)
                 StudentNotificationService.notify_points_redemption(
                     db_name=db_name,
                     student=student,
                     points_spent=reward.points_cost,
                     reward_name=reward.name,
-                    balance_after=balance_after,
+                    balance_after=tx.balance_after,
                     is_approval=True
                 )
             except Exception as notify_err:
@@ -481,49 +526,90 @@ class PointsService:
                 "claim_id": str(claim.id),
                 "reward_name": reward.name,
                 "points_spent": reward.points_cost,
-                "balance_after": balance_after,
+                "balance_after": tx.balance_after,
                 "transaction_id": str(tx.id)
             }
 
     @staticmethod
-    def award_competition_reward(db_name: str, participation: CompetitionParticipation, points: int, reason: str = ""):
+    def award_competition_reward(db_name: str, participation: CompetitionParticipation, points: int, reason: str = "", idempotency_key: str = None):
         """
-        منح نقاط جائزة المسابقة عند اجتياز المسابقة بنجاح.
+        منح نقاط جائزة المسابقة عند اجتياز المسابقة بنجاح عبر محرك الدفتر المركزي.
         """
         if points <= 0:
             return None
 
-        with transaction.atomic(using=db_name):
-            student = Student.objects.using(db_name).select_for_update().get(id=participation.student_id)
-            balance_before = student.points
-            balance_after = balance_before + points
-            
-            student.points = balance_after
-            student.save(using=db_name, update_fields=['points'])
+        key = idempotency_key or f"comp_prize_{participation.id}"
 
-            tx = PointTransaction.objects.using(db_name).create(
-                student=student,
+        with transaction.atomic(using=db_name):
+            # 1. Lock participation to prevent concurrent prize award calls (Idempotency)
+            part = CompetitionParticipation.objects.using(db_name).select_for_update().get(id=participation.id)
+            if part.points_awarded > 0:
+                logger.warning(f"Points already awarded ({part.points_awarded}) for participation {part.id}")
+                return None
+
+            # 2. Record Transaction via Central Ledger Engine
+            tx = PointsService.record_transaction(
+                db_name=db_name,
+                student_id=str(part.student_id),
                 amount=points,
                 transaction_type='COMPETITION_PRIZE',
-                reason=reason or f"جائزة الفوز/الاجتياز في مسابقة: {participation.competition.title}",
-                balance_before=balance_before,
-                balance_after=balance_after,
-                performed_by=participation.reviewed_by
+                reason=reason or f"جائزة الفوز/الاجتياز في مسابقة: {part.competition.title} [ref:{part.id}]",
+                performed_by=part.reviewed_by,
+                idempotency_key=key,
+                reference_id=str(part.id),
+                reference_type='COMPETITION_PARTICIPATION'
             )
 
-            participation.points_awarded = points
-            participation.save(using=db_name, update_fields=['points_awarded'])
+            part.points_awarded = points
+            part.save(using=db_name, update_fields=['points_awarded'])
 
             try:
                 from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService
+                student = Student.objects.using(db_name).get(id=part.student_id)
                 StudentNotificationService.notify_points_awarded(
                     db_name=db_name,
                     student=student,
                     amount=points,
-                    reason=reason or f"جائزة الفوز/الاجتياز في مسابقة: {participation.competition.title}",
-                    balance_after=balance_after
+                    reason=reason or f"جائزة الفوز/الاجتياز في مسابقة: {part.competition.title}",
+                    balance_after=tx.balance_after
                 )
             except Exception as notify_err:
                 logger.warning(f"Notification error on comp reward: {notify_err}")
 
             return tx
+
+    @staticmethod
+    def refund_points(db_name: str, original_transaction_id: str, performed_by: UserProfile, reason: str = ""):
+        """
+        استرجاع نقاط لحركة سابقة (Compensating Transaction) دون تعديل أو حذف الحركة الأصلية في الدفتر.
+        """
+        try:
+            orig_tx = PointTransaction.objects.using(db_name).get(id=original_transaction_id)
+        except PointTransaction.DoesNotExist:
+            raise ValueError("الحركة الأصلية غير موجودة")
+
+        if orig_tx.amount >= 0:
+            raise ValueError("لا يمكن استرجاع حركة موجبة (إيداع)، الاسترجاع يخص حركات الخصم فقط")
+
+        refund_amount = abs(orig_tx.amount)
+        refund_key = f"refund_{orig_tx.id}"
+
+        tx = PointsService.record_transaction(
+            db_name=db_name,
+            student_id=str(orig_tx.student_id),
+            amount=refund_amount,
+            transaction_type='REFUND',
+            reason=reason or f"استرجاع نقاط للحركة: {orig_tx.reason} [ref:{orig_tx.id}]",
+            performed_by=performed_by,
+            idempotency_key=refund_key,
+            reference_id=str(orig_tx.id),
+            reference_type='POINT_TRANSACTION'
+        )
+
+        return {
+            "success": True,
+            "refund_transaction_id": str(tx.id),
+            "original_transaction_id": str(orig_tx.id),
+            "refunded_points": refund_amount,
+            "balance_after": tx.balance_after
+        }

@@ -59,3 +59,26 @@ export const runUiAction = (action, { prefix, handlers }) => {
             return false;
     }
 };
+
+// ─── فهم «نعم/لا» الصوتي لتأكيد إجراء معلّق (يطابق منطق الخادم: النفي يغلب) ─────────
+const normalizeAr = (t) =>
+    String(t || '')
+        .replace(/[ً-ْـ]/g, '')
+        .replace(/[إأآٱ]/g, 'ا')
+        .replace(/ى/g, 'ي')
+        .replace(/ة/g, 'ه')
+        .replace(/[^؀-ۿa-z0-9\s]/gi, ' ')
+        .trim()
+        .toLowerCase();
+
+const YES_WORDS = new Set(['نعم', 'ايوه', 'ايوا', 'اي', 'ايه', 'اجل', 'تمام', 'اكد', 'اكيد', 'موافق', 'صح', 'طيب', 'يلا', 'ماشي', 'حاضر', 'اوكي', 'yes', 'ok']);
+const NO_WORDS = new Set(['لا', 'كلا', 'الغ', 'الغي', 'الغاء', 'وقف', 'no']);
+
+/** يرجع 'yes' | 'no' | null. يُطبَّق فقط على ردود قصيرة (حتى 3 كلمات) حتى لا يُلتقط كلام آخر. */
+export const parseYesNo = (utterance) => {
+    const words = normalizeAr(utterance).split(/\s+/).filter(Boolean);
+    if (words.length === 0 || words.length > 3) return null;
+    if (words.some((w) => NO_WORDS.has(w))) return 'no';
+    if (words.some((w) => YES_WORDS.has(w))) return 'yes';
+    return null;
+};

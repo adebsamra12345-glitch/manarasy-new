@@ -245,6 +245,7 @@ MIGRATION_MODULES = {
     'recitation_and_sabr': 'migrations.tenant_template.recitation_and_sabr',
     'reports_and_certificates': 'migrations.tenant_template.reports_and_certificates',
     'points_and_rewards': 'migrations.tenant_template.points_and_rewards',
+    'ai_assistant': 'migrations.tenant_template.ai_assistant',
 }
 
 # تفعيل موجه قواعد البيانات
@@ -320,5 +321,7 @@ AI_FEATURE_FLAGS = {
     'REPORT_INSIGHTS': os.getenv('AI_FEATURE_REPORT_INSIGHTS', 'True').lower() in ('true', '1', 't'),
     'QUIZ_GENERATOR': os.getenv('AI_FEATURE_QUIZ_GENERATOR', 'True').lower() in ('true', '1', 't'),
     'STT_TRANSCRIPTION': os.getenv('AI_FEATURE_STT_TRANSCRIPTION', 'True').lower() in ('true', '1', 't'),
+    # قراءة الردود بصوت الخادم (يتطلب TTS_BASE_URL في orchestrator)؛ الافتراضي مغلق والمتصفح يقرأ
+    'TTS_SPEECH': os.getenv('AI_FEATURE_TTS_SPEECH', 'False').lower() in ('true', '1', 't'),
 }
 

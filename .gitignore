@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.pyc
@@ -16,6 +16,10 @@ frontend/dist/
 backend/media/
 backend/staticfiles/
 backend/dbdump.json
+backend/private_media/
+*.sqlite3
+*.bak
+*.xlsx
 
 # Claude Code local worktrees/state
 .claude/
@@ -28,3 +32,6 @@ gpu-stack/data/*
 *.safetensors
 *.gguf
 .pytest_cache/
+
+.venv
+*.venv

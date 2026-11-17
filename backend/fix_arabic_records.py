@@ -20,6 +20,7 @@ if db_name not in settings.DATABASES:
         'NAME': db_name,
         'USER': tenant.db_user or master_db.get('USER', 'manara_user'),
         'PASSWORD': tenant.db_password_hash or master_db.get('PASSWORD', 'M@nara_2026_Str0ng!'),
+        'PASSWORD': tenant.db_password_hash or master_db.get('PASSWORD') or os.getenv('DB_PASSWORD', ''),
         'HOST': tenant.db_host or 'localhost',
         'PORT': tenant.db_port or 5432,
     })

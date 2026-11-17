@@ -127,3 +127,93 @@ class RoleBasedStudentIsolationTests(SimpleTestCase):
         self.assertTrue(_can_access_student("db_test", teacher_profile, "TEACHER", student_in_ring))
         self.assertFalse(_can_access_student("db_test", teacher_profile, "TEACHER", student_other_ring))
 
+
+class AgentChatIntegrationTests(SimpleTestCase):
+    @override_settings(
+        ORCHESTRATOR_BASE_URL="http://127.0.0.1:59999",
+        ORCHESTRATOR_SERVICE_KEY="test-key",
+        ORCHESTRATOR_TIMEOUT_SECONDS=0.2,
+    )
+    def test_agent_chat_graceful_fallback_when_offline(self):
+        client = OrchestratorClient()
+        res = client.agent_chat(
+            message="مرحباً، كيف أسجل الحضور؟",
+            session_id="s1",
+            halaqat_ids=["h1"],
+            user_id="u1",
+            role="TEACHER",
+            tenant_id="t1",
+        )
+        self.assertFalse(res["ai_available"])
+        self.assertIn("غير متاح", res["answer"])
+        self.assertEqual(res["session_id"], "s1")
+
+    @override_settings(
+        AI_FEATURE_FLAGS={
+            "MASTER_ENABLED": True,
+            "VOICE_TEXT_AGENT": False,
+        }
+    )
+    def test_agent_chat_feature_flag_disabled(self):
+        client = OrchestratorClient()
+        res = client.agent_chat(
+            message="السلام عليكم",
+            user_id="u1",
+            role="TEACHER",
+            tenant_id="t1",
+        )
+        self.assertFalse(res["ai_available"])
+        self.assertFalse(res["feature_enabled"])
+
+    @patch.object(OrchestratorClient, "_post")
+    def test_agent_chat_success_flow(self, mock_post):
+        mock_post.return_value = (
+            True,
+            {
+                "answer": "وعليكم السلام! كيف أساعدك اليوم؟",
+                "tool_calls_made": [],
+                "confirm_required": None,
+                "session_id": "test-session-123",
+            },
+        )
+        client = OrchestratorClient()
+        res = client.agent_chat(
+            message="السلام عليكم",
+            session_id="test-session-123",
+            user_id="u-teacher",
+            role="TEACHER",
+            tenant_id="t1",
+        )
+        self.assertTrue(res["ai_available"])
+        self.assertEqual(res["answer"], "وعليكم السلام! كيف أساعدك اليوم؟")
+        self.assertEqual(res["tool_calls_made"], [])
+        self.assertIsNone(res["confirm_required"])
+        self.assertEqual(res["session_id"], "test-session-123")
+
+
+
+class TtsClientTests(SimpleTestCase):
+    @override_settings(ORCHESTRATOR_BASE_URL='http://orch', ORCHESTRATOR_SERVICE_KEY='k',
+                       AI_FEATURE_FLAGS={'MASTER_ENABLED': True, 'TTS_SPEECH': False})
+    def test_disabled_flag_returns_none_so_browser_reads(self):
+        audio, _ = OrchestratorClient().speak(text='مرحبا', user_id='u', role='TEACHER', tenant_id='t')
+        self.assertIsNone(audio)
+
+    @override_settings(ORCHESTRATOR_BASE_URL='http://orch', ORCHESTRATOR_SERVICE_KEY='k',
+                       AI_FEATURE_FLAGS={'MASTER_ENABLED': True, 'TTS_SPEECH': True})
+    def test_enabled_returns_audio_bytes(self):
+        class Resp:
+            headers = {'Content-Type': 'audio/mpeg'}
+            def read(self): return b'AUDIO'
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        with patch('urllib.request.urlopen', return_value=Resp()):
+            audio, ctype = OrchestratorClient().speak(text='مرحبا', user_id='u', role='TEACHER', tenant_id='t')
+        self.assertEqual((audio, ctype), (b'AUDIO', 'audio/mpeg'))
+
+    @override_settings(ORCHESTRATOR_BASE_URL='http://orch', ORCHESTRATOR_SERVICE_KEY='k',
+                       AI_FEATURE_FLAGS={'MASTER_ENABLED': True, 'TTS_SPEECH': True})
+    def test_failure_returns_none(self):
+        with patch('urllib.request.urlopen', side_effect=OSError('down')):
+            audio, _ = OrchestratorClient().speak(text='مرحبا', user_id='u', role='TEACHER', tenant_id='t')
+        self.assertIsNone(audio)

@@ -107,6 +107,23 @@ services:
     environment:
       - AGENT_BACKEND=django
       - DJANGO_BASE_URL=http://manarasy-backend:8000
+      - VLLM_BASE_URL=http://100.119.62.40:8000/v1
+      - STT_BASE_URL=http://100.119.62.40:8001/v1
+      - VLLM_MODEL_AGENT=manarasy
+      - VLLM_MODEL_TEXT=base
+      - VLLM_MODEL_FALLBACK=base
+      - REDIS_URL=redis://manarasy-redis:6379/0
+      # نشر تدريجي لمحوّل الوكيل (الرجوع: AGENT_CANARY_PERCENT=0). انظر orchestrator/app/rollout.py
+      - AGENT_CANARY_PERCENT=${AGENT_CANARY_PERCENT:-0}
+      - VLLM_MODEL_AGENT_CANARY=${VLLM_MODEL_AGENT_CANARY:-}
+      - AGENT_CANARY_TENANTS=${AGENT_CANARY_TENANTS:-}
+      - AGENT_UI_TOOL=${AGENT_UI_TOOL:-0}
+      # TTS خادمي اختياري (فارغ = المتصفح يقرأ الردود)
+      - TTS_BASE_URL=${TTS_BASE_URL:-}
+      - TTS_MODEL=${TTS_MODEL:-}
+      - TTS_VOICE=${TTS_VOICE:-}
+    depends_on:
+      - manarasy-redis
     networks:
       - manarasy-internal
     healthcheck:
@@ -115,6 +132,23 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # ==========================================
+  # Redis: حالة الحوار وجلسات المحادثة والتأكيدات (قصيرة العمر، TTL إلزامي)
+  # داخل الشبكة المعزولة فقط، بلا منافذ معلنة ولا حفظ على القرص
+  # ==========================================
+  manarasy-redis:
+    image: redis:7-alpine
+    container_name: manarasy-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "volatile-ttl"]
+    networks:
+      - manarasy-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 # ==========================================
 # وحدات التخزين المشتركة والمعزولة

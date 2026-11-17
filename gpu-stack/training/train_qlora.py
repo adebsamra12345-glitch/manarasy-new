@@ -257,13 +257,15 @@ def main() -> int:
         "train_samples": len(train_rows),
         "val_samples": len(val_rows),
         "epochs": args.epochs,
+        "learning_rate": args.lr,
+        "train_file": str(args.train_file),
         "lora_r": args.lora_r,
         "lora_alpha": args.lora_alpha,
         "train_loss": round(float(train_result.training_loss), 4),
         "eval_loss": round(float(eval_metrics.get("eval_loss", 0.0)), 4),
         "peak_process_vram_mb": peak_vram_mb,
     }
-    summary_file = DEFAULT_DATA_DIR / "training_summary.json"
+    summary_file = DEFAULT_DATA_DIR / f"training_summary_{Path(args.output_dir).name}.json"  # باسم المحوّل: لا يُستبدل
     summary_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("=" * 78)

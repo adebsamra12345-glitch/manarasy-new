@@ -97,6 +97,7 @@ async def chat_completion(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
     endpoint: str = "",
+    circuit=None,
 ) -> dict[str, Any]:
     s = get_settings()
     model = model or s.vllm_model_text
@@ -121,7 +122,7 @@ async def chat_completion(
                 r.raise_for_status()
                 return r.json()
 
-        data = await retry_with_backoff(_do_call, llm_circuit)
+        data = await retry_with_backoff(_do_call, circuit or llm_circuit)
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         usage = data.get("usage") or {}

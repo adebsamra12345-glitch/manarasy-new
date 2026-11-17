@@ -20,6 +20,12 @@ class Settings:
     vllm_model_report_insight: str = ""    # فارغ = TEXT
     stt_base_url: str = ""
     stt_model_name: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
+    # TTS خادمي اختياري (خدمة متوافقة مع OpenAI /v1/audio/speech). فارغ = معطّل والمتصفح يقرأ الردود
+    tts_base_url: str = ""
+    tts_model: str = ""
+    tts_voice: str = ""
+    tts_timeout_seconds: float = 20.0
+    tts_max_chars: int = 600
 
     agent_backend: str = "mock"
     django_base_url: str = "http://127.0.0.1:8000"
@@ -57,6 +63,11 @@ class Settings:
             vllm_model_report_insight=os.getenv("VLLM_MODEL_REPORT_INSIGHT", ""),
             stt_base_url=os.getenv("STT_BASE_URL", "http://100.119.62.40:8001/v1").rstrip("/"),
             stt_model_name=os.getenv("STT_MODEL_NAME", "deepdml/faster-whisper-large-v3-turbo-ct2"),
+            tts_base_url=os.getenv("TTS_BASE_URL", "").rstrip("/"),
+            tts_model=os.getenv("TTS_MODEL", ""),
+            tts_voice=os.getenv("TTS_VOICE", ""),
+            tts_timeout_seconds=float(os.getenv("TTS_TIMEOUT_SECONDS", "20.0")),
+            tts_max_chars=int(os.getenv("TTS_MAX_CHARS", "600")),
             agent_backend=os.getenv("AGENT_BACKEND", "mock"),
             django_base_url=os.getenv("DJANGO_BASE_URL", "http://127.0.0.1:8000").rstrip("/"),
             agent_jwt_secret=os.getenv("AGENT_JWT_SECRET", "dev-only-secret-change-me"),

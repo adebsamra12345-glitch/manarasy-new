@@ -260,3 +260,144 @@
     inset-inline-start: 16px;
   }
 }
+
+/* ───── واجهة المحادثة ───── */
+.agent-panel {
+  max-height: min(560px, calc(100vh - 120px));
+}
+
+.agent-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 120px;
+  max-height: 320px;
+  padding: 2px;
+}
+
+.agent-empty {
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  text-align: center;
+  padding: 16px 8px;
+}
+
+.agent-bubble {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.agent-bubble.user {
+  align-self: flex-start;
+  background: var(--primary-green, #166534);
+  color: #fff;
+  border-end-start-radius: 4px;
+}
+
+.agent-bubble.bot {
+  align-self: flex-end;
+  background: var(--bg-light, #f3f4f6);
+  color: var(--text-primary, #111827);
+  border-end-end-radius: 4px;
+}
+
+.agent-bubble.bot.ok {
+  background: var(--card-light-green, #ecfdf5);
+  color: #065f46;
+}
+
+.agent-bubble.bot.err {
+  background: var(--card-light-orange, #fef2f2);
+  color: #991b1b;
+}
+
+.agent-new-chat {
+  margin-inline-start: auto;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.agent-new-chat:hover:not(:disabled) {
+  background: var(--bg-light, #f3f4f6);
+}
+
+.agent-new-chat:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* زر قراءة الردود */
+.agent-speaker {
+  margin-inline-start: auto;
+}
+
+.agent-speaker + .agent-new-chat {
+  margin-inline-start: 0;
+}
+
+.agent-speaker.speaking {
+  color: var(--primary-green, #166534);
+  background: var(--card-light-green, #ecfdf5);
+  animation: agent-pulse 1.2s infinite ease-in-out;
+}
+
+/* تقييم الردود وإشعار الخصوصية */
+.agent-rate {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: 8px;
+  vertical-align: middle;
+}
+
+.agent-rate button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+
+.agent-rate button:hover,
+.agent-rate button.on {
+  color: var(--primary-green, #166534);
+  background: var(--card-light-green, #ecfdf5);
+}
+
+.agent-rate button.bad:hover,
+.agent-rate button.bad.on {
+  color: #991b1b;
+  background: var(--card-light-orange, #fef2f2);
+}
+
+.agent-privacy {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #6b7280);
+}
+
+.agent-privacy button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #991b1b;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}

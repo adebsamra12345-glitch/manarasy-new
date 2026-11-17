@@ -68,8 +68,9 @@ def main():
         c["utterance"].strip()
         for c in json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
     }
-    train_ok, train_tc = validate_file(DATA_DIR / "train.jsonl", golden)
-    val_ok, val_tc = validate_file(DATA_DIR / "val.jsonl", golden)
+    sfx = f"_{sys.argv[1]}" if len(sys.argv) > 1 else ""  # مثال: validate_dataset.py v3
+    train_ok, train_tc = validate_file(DATA_DIR / f"train{sfx}.jsonl", golden)
+    val_ok, val_tc = validate_file(DATA_DIR / f"val{sfx}.jsonl", golden)
     print(f"✅ فحص الجودة ناجح 100%: train={train_ok} (أدوات مفحوصة={train_tc}) | val={val_ok} (أدوات مفحوصة={val_tc}) | تسرب البيانات=0")
 
 

@@ -107,6 +107,9 @@ def mosque_admin_dashboard_api(request):
             except Exception:
                 pass
 
+        if not auth_role or auth_role not in ['TENANT_ADMIN', 'CENTER_MANAGER', 'SUPER_ADMIN']:
+            return JsonResponse({"status": "error", "message": "غير مصرح لك بالوصول إلى لوحة التحكم الإدارية للمسجد"}, status=403 if auth_role else 401)
+
         # 1. قائمة المراكز التابعة للمستأجر
         if auth_role == 'CENTER_MANAGER' and user_center_id:
             centers_qs = Center.objects.using(db_name).filter(id=user_center_id, is_active=True)
@@ -531,6 +534,15 @@ def approve_registration_request_api(request, request_id):
             except Exception:
                 pass
 
+        if not reviewer_profile:
+            return JsonResponse({"status": "error", "message": "التوثيق مطلوب للقيام بهذا الإجراء"}, status=401)
+        reviewer_roles = reviewer_profile.get_roles() if reviewer_profile else []
+        if 'TENANT_ADMIN' not in reviewer_roles and 'CENTER_MANAGER' not in reviewer_roles:
+            return JsonResponse({"status": "error", "message": "صلاحيات مدير النظام أو مدير المركز مطلوبة للموافقة على الطلبات"}, status=403)
+        if 'CENTER_MANAGER' in reviewer_roles and 'TENANT_ADMIN' not in reviewer_roles:
+            if reviewer_profile.center and reg_req.halaqa and reg_req.halaqa.center != reviewer_profile.center:
+                return JsonResponse({"status": "error", "message": "غير مصرح لمدير المركز بالموافقة على طلبات خارج مركزه"}, status=403)
+
         if reg_req.request_type == 'UPDATE' and reg_req.student:
             student = reg_req.student
             if reg_req.full_name: student.full_name = reg_req.full_name
@@ -656,6 +668,15 @@ def reject_registration_request_api(request, request_id):
                     reviewer_profile = UserProfile.objects.using(db_name).filter(user__id=user_id).first()
             except Exception:
                 pass
+
+        if not reviewer_profile:
+            return JsonResponse({"status": "error", "message": "التوثيق مطلوب للقيام بهذا الإجراء"}, status=401)
+        reviewer_roles = reviewer_profile.get_roles() if reviewer_profile else []
+        if 'TENANT_ADMIN' not in reviewer_roles and 'CENTER_MANAGER' not in reviewer_roles:
+            return JsonResponse({"status": "error", "message": "صلاحيات مدير النظام أو مدير المركز مطلوبة لرفض الطلبات"}, status=403)
+        if 'CENTER_MANAGER' in reviewer_roles and 'TENANT_ADMIN' not in reviewer_roles:
+            if reviewer_profile.center and reg_req.halaqa and reg_req.halaqa.center != reviewer_profile.center:
+                return JsonResponse({"status": "error", "message": "غير مصرح لمدير المركز برفض طلبات خارج مركزه"}, status=403)
 
         rejection_reason = ""
         try:

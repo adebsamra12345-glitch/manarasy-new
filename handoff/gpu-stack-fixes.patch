@@ -1,0 +1,58 @@
+diff -ruN a/gpu-stack/docker-compose.yml b/gpu-stack/docker-compose.yml
+--- a/gpu-stack/docker-compose.yml	2026-11-11 14:15:58.019760622 +0000
++++ b/gpu-stack/docker-compose.yml	2026-11-11 14:15:58.020354655 +0000
+@@ -2,8 +2,8 @@
+ # بيئة الاستدلال والصوت لمنصة منارة (GPU Node - adebserver)
+ # الكرت: NVIDIA RTX 5070 Ti (16GB VRAM)
+ # المستخدم من خدمات أخرى: ~6.4GB
+-# مخصص لـ vLLM (Qwen3-8B 4-bit): gpu-memory-utilization=0.40 (~6.55GB)
+-# الهامش الآمن المتبقي: >= 2.5GB
++# vLLM 0.33 أزال bitsandbytes: نستخدم FP8 online (Qwen3-8B ~9GB أوزان) مع gpu-memory-utilization=0.80 (~12.4GB)
++# يتطلب كرتاً شبه مخصص (لا يتعايش مع خدمات أخرى تستهلك ~6.4GB)
+ # ==========================================
+ 
+ services:
+@@ -18,9 +18,8 @@
+     command: >
+       --model /models/Qwen3-8B
+       --served-model-name base
+-      --quantization bitsandbytes
+-      --load-format bitsandbytes
+-      --gpu-memory-utilization 0.40
++      --quantization fp8
++      --gpu-memory-utilization 0.80
+       --max-model-len 4096
+       --max-num-seqs 4
+       --enable-auto-tool-choice
+diff -ruN a/gpu-stack/training/train_qlora.py b/gpu-stack/training/train_qlora.py
+--- a/gpu-stack/training/train_qlora.py	2026-11-11 14:15:58.021200137 +0000
++++ b/gpu-stack/training/train_qlora.py	2026-11-11 14:15:58.021727696 +0000
+@@ -144,9 +144,8 @@
+         AutoModelForCausalLM,
+         AutoTokenizer,
+         BitsAndBytesConfig,
+-        TrainingArguments,
+     )
+-    from trl import SFTTrainer
++    from trl import SFTConfig, SFTTrainer
+ 
+     if not torch.cuda.is_available():
+         print("❌ لم يتم العثور على بطاقة CUDA GPU. استخدم --dry-run للفحص بدون GPU.", file=sys.stderr)
+@@ -194,7 +193,7 @@
+     model.print_trainable_parameters()
+ 
+     args.output_dir.mkdir(parents=True, exist_ok=True)
+-    training_args = TrainingArguments(
++    training_args = SFTConfig(
+         output_dir=str(args.output_dir),
+         num_train_epochs=args.epochs,
+         per_device_train_batch_size=1,
+@@ -221,6 +220,8 @@
+         max_grad_norm=0.3,
+         report_to="none",
+         seed=42,
++        max_length=args.max_seq_len,
++        dataset_text_field="text",
+     )
+ 
+     trainer = SFTTrainer(

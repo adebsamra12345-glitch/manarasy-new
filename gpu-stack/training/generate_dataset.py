@@ -11,7 +11,9 @@
   5. صياغة الملخصات التنفيذية لتقارير الحلقات (circle_report_insight).
 - يضمن عدم تسرب أي جملة من جمل التقييم الذهبي الـ20 (Zero Data Leakage with golden_ar.json).
 """
+import argparse
 import json
+import os
 import random
 import sys
 from collections import Counter
@@ -20,7 +22,11 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR / "orchestrator"))
 
+# أداة open_screen جزء من مواصفات v3 (يجب تفعيلها قبل توليد الأمثلة كي تطابق مواصفات التقديم)
+os.environ.setdefault("AGENT_UI_TOOL", "1")
+
 from app.agent_tools import specs_for
+from app.screen_data import SCREEN_BY_ID, screen_ids_for_role
 from app.prompts_loader import PromptRegistry
 
 PROMPTS = PromptRegistry(ROOT_DIR / "orchestrator" / "prompts")
@@ -78,6 +84,56 @@ def _agent_sample(role: str, dialect: str, category: str, utterance: str, tool_n
         "tools": specs_for(role),
         "messages": messages,
     }
+
+
+HALAQA_NAMES = ["حلقة الفاتحة", "حلقة البقرة", "حلقة النور", "حلقة الفرقان", "حلقة الإتقان"]
+
+# صيغ طلب التنقل بما لا يلتقطه الموجّه الحتمي عادةً (الموجّه يتكفل بالصيغ القياسية؛ النموذج للبقية)
+_NAV_PATTERNS = {
+    "فصحى": ["أريد الانتقال إلى {x}", "هل تفتح لي {x} من فضلك؟", "أحتاج إلى فتح {x} الآن", "يرجى نقلي إلى {x}"],
+    "سورية": ["ورجيني {x}", "فيك تفتحلي {x}؟", "بدي شوف {x} هلق", "خدني ع {x} لو سمحت"],
+    "قطرية": ["افتح لي {x} الحين", "أبي أشوف {x}", "وديني {x} لو سمحت", "طلعلي {x}"],
+}
+_LOGOUT = {"فصحى": ["أريد الخروج من حسابي", "أنهِ جلستي وسجّل خروجي"], "سورية": ["بدي طلع من حسابي", "سكرلي الحساب"], "قطرية": ["أبي أطلع من الحساب", "سكّر حسابي الحين"]}
+_PASSWORD = {"فصحى": ["أريد تغيير كلمة المرور", "كيف أغيّر كلمة السر؟"], "سورية": ["بدي غير كلمة السر", "شو الطريقة لتغيير كلمة المرور؟"], "قطرية": ["أبي أغير كلمة المرور", "ساعدني في تغيير الرقم السري"]}
+
+
+def _ui_navigation_samples(rng: random.Random, golden: set[str]) -> list[dict]:
+    """أمثلة open_screen: تبويبات كل دور + الإجراءات الافتراضية (جلسات حلقة، بدء جلسة، ملف طالب، كلمة المرور، خروج)."""
+    out: list[dict] = []
+
+    def add(role, dialect, utt, args):
+        if utt in golden:
+            return
+        out.append(_agent_sample(role, dialect, "ui_navigation", utt, "open_screen", args))
+
+    for role in ("TEACHER", "CENTER_MANAGER", "TENANT_ADMIN"):
+        allowed = set(screen_ids_for_role(role))
+        for sid in [i for i in allowed if i in SCREEN_BY_ID]:
+            for dialect, patterns in _NAV_PATTERNS.items():
+                for syn in rng.sample(list(SCREEN_BY_ID[sid].synonyms), min(2, len(SCREEN_BY_ID[sid].synonyms))):
+                    pat = rng.choice(patterns)
+                    add(role, dialect, pat.format(x=f"تبويب {syn}"), {"screen": sid})
+        for dialect, patterns in _NAV_PATTERNS.items():
+            for pat in patterns[:2]:
+                h = rng.choice(HALAQA_NAMES)
+                add(role, dialect, pat.format(x=f"الجلسات السابقة لـ{h}"), {"screen": "halaqa_sessions", "halaqa_query": h})
+                add(role, dialect, pat.format(x="الجلسات السابقة"), {"screen": "halaqa_sessions"})
+                name = rng.choice(STUDENT_NAMES)
+                add(role, dialect, pat.format(x=f"ملف الطالب {name}"), {"screen": "student_profile", "student_query": name})
+                add(role, dialect, pat.format(x="معلومات طالب"), {"screen": "student_profile"})
+        for dialect in _NAV_PATTERNS:
+            for utt in _LOGOUT[dialect]:
+                add(role, dialect, utt, {"screen": "logout"})
+            for utt in _PASSWORD[dialect]:
+                add(role, dialect, utt, {"screen": "change_password"})
+    # بدء جلسة تسميع (للمعلم والمدراء)
+    for dialect, tpl in (("فصحى", "ابدأ لي جلسة تسميع جديدة في {h}"), ("سورية", "فيك تبدألي جلسة تسميع جديدة بـ{h}؟"), ("قطرية", "أبي أبدأ جلسة تسميع جديدة في {h}")):
+        for h in HALAQA_NAMES:
+            add("TEACHER", dialect, tpl.format(h=h), {"screen": "start_session", "halaqa_query": h})
+        no_halaqa = {"فصحى": "أريد بدء جلسة تسميع جديدة", "سورية": "بدي ابدأ جلسة تسميع جديدة", "قطرية": "أبي أفتح جلسة تسميع جديدة"}[dialect]
+        add("TEACHER", dialect, no_halaqa, {"screen": "start_session"})
+    return out
 
 
 def generate_all_samples(seed: int = 42) -> list[dict]:
@@ -349,6 +405,8 @@ def generate_all_samples(seed: int = 42) -> list[dict]:
             }
         )
 
+    samples.extend(_ui_navigation_samples(random.Random(seed + 1), golden_utterances))
+
     rng.shuffle(samples)
     for idx, s in enumerate(samples, 1):
         s["id"] = f" sample-{idx:04d}"
@@ -356,6 +414,10 @@ def generate_all_samples(seed: int = 42) -> list[dict]:
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--suffix", default="", help="لاحقة ملفات الإخراج، مثل v3 => train_v3.jsonl (لا يُكتب فوق v2)")
+    args = ap.parse_args()
+    sfx = f"_{args.suffix}" if args.suffix else ""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     all_samples = generate_all_samples(seed=42)
 
@@ -364,8 +426,8 @@ def main():
     train_set = all_samples[:split_idx]
     val_set = all_samples[split_idx:]
 
-    train_path = OUT_DIR / "train.jsonl"
-    val_path = OUT_DIR / "val.jsonl"
+    train_path = OUT_DIR / f"train{sfx}.jsonl"
+    val_path = OUT_DIR / f"val{sfx}.jsonl"
 
     with train_path.open("w", encoding="utf-8") as f:
         for item in train_set:

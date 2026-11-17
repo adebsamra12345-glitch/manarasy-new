@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from core_system.auth import tenant_auth, get_tenant_db, get_tenant_db_and_obj
 from django.conf import settings
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q, Sum, Avg, Count
 from django.db.models.functions import Coalesce
 
@@ -116,13 +117,21 @@ def student_points_list_view(request):
     if not profile:
         return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
+    # 1. Broken Access Control & Role Scoping
+    if profile.role in ['STUDENT', 'PARENT']:
+        return JsonResponse({'status': 'error', 'message': 'بوابة الطلاب المخصصة متاحة لعرض النقاط الخاصة بك'}, status=403)
+
     search = request.GET.get('search', '').strip()
     center_id = request.GET.get('center_id')
     halaqa_id = request.GET.get('halaqa_id')
 
     qs = Student.objects.using(db).select_related('halaqa', 'halaqa__center').all()
 
-    if profile.role == 'CENTER_MANAGER' and profile.center_id:
+    if profile.role == 'TEACHER':
+        teacher_name = f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username if profile and profile.user else ''
+        teacher_halaqat_ids = Halaqa.objects.using(db).filter(teacher_name=teacher_name, is_active=True).values_list('id', flat=True)
+        qs = qs.filter(halaqa_id__in=teacher_halaqat_ids)
+    elif profile.role == 'CENTER_MANAGER' and profile.center_id:
         qs = qs.filter(halaqa__center_id=profile.center_id)
     elif center_id:
         qs = qs.filter(halaqa__center_id=center_id)
@@ -137,12 +146,14 @@ def student_points_list_view(request):
             Q(registration_number__icontains=search)
         )
 
+    # 2. PII Data Leakage Prevention: Redact national_id for non-superadmins
+    is_admin = profile.role in ['TENANT_ADMIN', 'SUPER_ADMIN']
     students = []
     for s in qs.order_by('full_name'):
         students.append({
             'id': str(s.id),
             'full_name': s.full_name,
-            'national_id': s.national_id,
+            'national_id': s.national_id if is_admin else None,
             'registration_number': s.registration_number,
             'gender': s.gender,
             'gender_display': 'ذكر' if s.gender == 'M' else 'أنثى',
@@ -179,6 +190,7 @@ def grant_bonus_points_view(request):
         data = parse_body(request)
         student_id = data.get('student_id')
         reason = data.get('reason', '').strip()
+        idempotency_key = data.get('idempotency_key') or request.headers.get('X-Idempotency-Key')
 
         if not student_id:
             return JsonResponse({'status': 'error', 'message': 'معرف الطالب مطلوب'}, status=400)
@@ -189,7 +201,8 @@ def grant_bonus_points_view(request):
             db_name=db,
             student_id=student_id,
             performed_by=profile,
-            reason=reason
+            reason=reason,
+            idempotency_key=idempotency_key
         )
 
         return JsonResponse({'status': 'success', 'message': 'تم منح +1 نقطة مكافأة سلوكية بنجاح', 'data': result})
@@ -226,7 +239,17 @@ def points_transactions_view(request):
     if tx_type:
         qs = qs.filter(transaction_type=tx_type)
 
-    if profile.role == 'CENTER_MANAGER' and profile.center_id:
+    # Role-based query scoping & PII protection
+    if profile.role in ['STUDENT', 'PARENT']:
+        active_student, _, _ = resolve_student_for_user(db, profile)
+        if not active_student:
+            return JsonResponse({'status': 'error', 'message': 'لا توجد بيانات مرتبطة بحسابك'}, status=403)
+        qs = qs.filter(student_id=active_student.id)
+    elif profile.role == 'TEACHER':
+        teacher_name = f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username if profile and profile.user else ''
+        teacher_halaqat_ids = Halaqa.objects.using(db).filter(teacher_name=teacher_name, is_active=True).values_list('id', flat=True)
+        qs = qs.filter(student__halaqa_id__in=teacher_halaqat_ids)
+    elif profile.role == 'CENTER_MANAGER' and profile.center_id:
         qs = qs.filter(student__halaqa__center_id=profile.center_id)
 
     transactions = []
@@ -243,6 +266,9 @@ def points_transactions_view(request):
             'balance_before': tx.balance_before,
             'balance_after': tx.balance_after,
             'performed_by': performed_by_name,
+            'idempotency_key': tx.idempotency_key,
+            'reference_id': tx.reference_id,
+            'reference_type': tx.reference_type,
             'created_at': tx.created_at.strftime('%Y-%m-%d %H:%M'),
         })
 
@@ -420,6 +446,10 @@ def redeem_reward_view(request):
     if not profile:
         return JsonResponse({'status': 'error', 'message': getattr(request, 'auth_error', 'التوثيق مطلوب')}, status=401)
 
+    # Broken Access Control Hardening: Only managers and admins can execute direct reward redemptions
+    if profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN', 'CENTER_MANAGER']:
+        return JsonResponse({'status': 'error', 'message': 'ليس لديك صلاحية استبدال وصرف المكافأة المباشر'}, status=403)
+
     try:
         data = parse_body(request)
         student_id = data.get('student_id')
@@ -429,12 +459,31 @@ def redeem_reward_view(request):
         if not student_id or not reward_id:
             return JsonResponse({'status': 'error', 'message': 'معرف الطالب والمكافأة مطلوبان'}, status=400)
 
+        # Center Manager Scoping Verification
+        if profile.role == 'CENTER_MANAGER' and profile.center_id:
+            try:
+                target_student = Student.objects.using(db).select_related('halaqa').get(id=student_id)
+                if target_student.halaqa and target_student.halaqa.center_id and target_student.halaqa.center_id != profile.center_id:
+                    return JsonResponse({'status': 'error', 'message': 'غير مصرح لك بصرف مكافأة لطالب من مركز آخر'}, status=403)
+            except Student.DoesNotExist:
+                return JsonResponse({'status': 'error', 'message': 'الطالب غير موجود'}, status=404)
+
+            try:
+                target_reward = Reward.objects.using(db).get(id=reward_id)
+                if target_reward.center_id and target_reward.center_id != profile.center_id:
+                    return JsonResponse({'status': 'error', 'message': 'المكافأة المحددة تابعة لمركز آخر'}, status=403)
+            except Reward.DoesNotExist:
+                return JsonResponse({'status': 'error', 'message': 'المكافأة المحددة غير موجودة'}, status=404)
+
+        idempotency_key = data.get('idempotency_key') or request.headers.get('X-Idempotency-Key')
+
         result = PointsService.redeem_reward(
             db_name=db,
             student_id=student_id,
             reward_id=reward_id,
             performed_by=profile,
-            notes=notes
+            notes=notes,
+            idempotency_key=idempotency_key
         )
 
         return JsonResponse({'status': 'success', 'message': 'تم استبدال وصرف المكافأة بنجاح', 'data': result})
@@ -474,7 +523,17 @@ def admin_claims_list_view(request):
         'student', 'student__halaqa', 'student__halaqa__center', 'reward', 'processed_by', 'processed_by__user'
     ).all()
 
-    if profile.role == 'CENTER_MANAGER' and profile.center_id:
+    # Role-based query scoping & PII protection
+    if profile.role in ['STUDENT', 'PARENT']:
+        active_student, _, _ = resolve_student_for_user(db, profile)
+        if not active_student:
+            return JsonResponse({'status': 'error', 'message': 'لا توجد بيانات مرتبطة بحسابك'}, status=403)
+        qs = qs.filter(student_id=active_student.id)
+    elif profile.role == 'TEACHER':
+        teacher_name = f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username if profile and profile.user else ''
+        teacher_halaqat_ids = Halaqa.objects.using(db).filter(teacher_name=teacher_name, is_active=True).values_list('id', flat=True)
+        qs = qs.filter(student__halaqa_id__in=teacher_halaqat_ids)
+    elif profile.role == 'CENTER_MANAGER' and profile.center_id:
         qs = qs.filter(student__halaqa__center_id=profile.center_id)
     elif center_id:
         qs = qs.filter(student__halaqa__center_id=center_id)
@@ -1443,66 +1502,92 @@ def student_submit_competition_view(request, pk):
         participation_id = data.get('participation_id')
         answers = data.get('answers', [])
 
-        participation = CompetitionParticipation.objects.using(db).select_related('competition', 'student').get(
-            id=participation_id, competition_id=pk
-        )
+        if not participation_id:
+            return JsonResponse({'status': 'error', 'message': 'معرف المشاركة مطلوب'}, status=400)
 
-        if participation.status in ['SUBMITTED', 'GRADED']:
-            return JsonResponse({'status': 'error', 'message': 'تم تسليم هذه المحاولة مسبقاً'}, status=400)
+        # 1. Broken Access Control: Resolve student profile
+        student, _, _ = resolve_student_for_user(db, profile)
+        if not student and profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN']:
+            return JsonResponse({'status': 'error', 'message': 'لم يتم العثور على ملف الطالب'}, status=403)
 
-        total_score = Decimal('0.00')
-        total_possible = Decimal('0.00')
-        has_essay = False
-
-        questions_map = {str(q.id): q for q in participation.competition.questions.all()}
-
-        for ans in answers:
-            q_id = str(ans.get('question_id'))
-            student_ans_val = str(ans.get('student_answer', '')).strip()
-
-            q_obj = questions_map.get(q_id)
-            if not q_obj:
-                continue
-
-            total_possible += q_obj.points
-            is_correct = None
-            score_awarded = Decimal('0.00')
-
-            if q_obj.question_type in ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'MATCHING']:
-                if student_ans_val and student_ans_val == q_obj.correct_answer.strip():
-                    is_correct = True
-                    score_awarded = q_obj.points
-                    total_score += score_awarded
-                else:
-                    is_correct = False
-            elif q_obj.question_type == 'ESSAY':
-                has_essay = True
-
-            QuestionAnswer.objects.using(db).create(
-                participation=participation,
-                question=q_obj,
-                student_answer=student_ans_val,
-                is_correct=is_correct,
-                score_awarded=score_awarded
-            )
-
-        participation.score = total_score
-        participation.total_possible_score = total_possible
-        participation.submitted_at = timezone.now()
-        participation.status = 'SUBMITTED' if has_essay else 'GRADED'
-        participation.save(using=db)
-
-        points_gained = 0
-        if not has_essay and total_possible > 0:
-            percentage = (total_score / total_possible) * 100
-            if percentage >= 60:
-                points_gained = participation.competition.points_reward
-                PointsService.award_competition_reward(
-                    db_name=db,
-                    participation=participation,
-                    points=points_gained,
-                    reason=f"جائزة الفوز بالمسابقة: {participation.competition.title}"
+        with transaction.atomic(using=db):
+            try:
+                participation = CompetitionParticipation.objects.using(db).select_for_update().select_related('competition', 'student').get(
+                    id=participation_id, competition_id=pk
                 )
+            except CompetitionParticipation.DoesNotExist:
+                return JsonResponse({'status': 'error', 'message': 'سجل المشاركة غير موجود'}, status=404)
+
+            # Ensure student is submitting their own attempt
+            if student and participation.student_id != student.id and profile.role not in ['TENANT_ADMIN', 'SUPER_ADMIN']:
+                return JsonResponse({'status': 'error', 'message': 'غير مصرح لك بتسليم مشاركة طالب آخر'}, status=403)
+
+            # 2. Concurrency & Race Condition Guard under exclusive row lock
+            if participation.status in ['SUBMITTED', 'GRADED']:
+                return JsonResponse({'status': 'error', 'message': 'تم تسليم هذه المحاولة مسبقاً'}, status=400)
+
+            total_score = Decimal('0.00')
+            total_possible = Decimal('0.00')
+            has_essay = False
+
+            questions_map = {str(q.id): q for q in participation.competition.questions.all()}
+
+            # Clean any previously saved answers for this participation
+            QuestionAnswer.objects.using(db).filter(participation=participation).delete()
+
+            answers_to_create = []
+            for ans in answers:
+                q_id = str(ans.get('question_id'))
+                student_ans_val = str(ans.get('student_answer', '')).strip()
+
+                q_obj = questions_map.get(q_id)
+                if not q_obj:
+                    continue
+
+                total_possible += q_obj.points
+                is_correct = None
+                score_awarded = Decimal('0.00')
+
+                if q_obj.question_type in ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'MATCHING']:
+                    if student_ans_val and student_ans_val == q_obj.correct_answer.strip():
+                        is_correct = True
+                        score_awarded = q_obj.points
+                        total_score += score_awarded
+                    else:
+                        is_correct = False
+                elif q_obj.question_type == 'ESSAY':
+                    has_essay = True
+
+                answers_to_create.append(QuestionAnswer(
+                    participation=participation,
+                    question=q_obj,
+                    student_answer=student_ans_val,
+                    is_correct=is_correct,
+                    score_awarded=score_awarded
+                ))
+
+            if answers_to_create:
+                QuestionAnswer.objects.using(db).bulk_create(answers_to_create)
+
+            participation.score = total_score
+            participation.total_possible_score = total_possible
+            participation.submitted_at = timezone.now()
+            participation.status = 'SUBMITTED' if has_essay else 'GRADED'
+            participation.save(using=db, update_fields=['score', 'total_possible_score', 'submitted_at', 'status'])
+
+            points_gained = 0
+            if not has_essay and total_possible > 0:
+                percentage = (total_score / total_possible) * 100
+                if percentage >= 60:
+                    points_gained = participation.competition.points_reward
+                    # Idempotency safeguard: Award points only if points_awarded == 0
+                    if participation.points_awarded == 0 and points_gained > 0:
+                        PointsService.award_competition_reward(
+                            db_name=db,
+                            participation=participation,
+                            points=points_gained,
+                            reason=f"جائزة الفوز بالمسابقة: {participation.competition.title}"
+                        )
 
         try:
             from tenant_modules.centers_and_projects.student_notifications import StudentNotificationService

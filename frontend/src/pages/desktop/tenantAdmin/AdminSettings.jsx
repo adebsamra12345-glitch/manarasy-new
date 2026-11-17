@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { UploadSimple, Trash, FloppyDisk, Lock, Image as ImageIcon, CheckCircle, WarningCircle } from '@phosphor-icons/react';
 import { getTenantSettings, updateTenantSettings } from '../../../services/api/tenantService';
+import AgentPrivacyCard from '../../../component/agent/AgentPrivacyCard';
+import AgentReviewPanel from '../../../component/agent/AgentReviewPanel';
 import './adminSettings.css';
 
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -190,6 +192,9 @@ const AdminSettings = () => {
                     </button>
                 </div>
             </form>
+
+            <AgentPrivacyCard />
+            <AgentReviewPanel />
         </div>
     );
 };

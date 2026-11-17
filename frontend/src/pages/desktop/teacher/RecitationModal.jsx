@@ -5,6 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { evaluateRecitation, updateRecitationEvaluation } from '../../../services/api/tenantService';
 import { JUZ_AMMA_SURAHS, getSurahName } from '../../../utils/quranData';
+import { resolveGradeColor } from '../../../utils/gradeColors';
 
 /**
  * RecitationModal
@@ -774,7 +775,7 @@ const RecitationModal = ({
                             {currentPageResult && (
                                 <div style={{
                                     display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                                    background: currentPageResult.color_code || '#558b2f',
+                                    background: resolveGradeColor(currentPageResult.color_code),
                                     color: '#fff', padding: '0.45rem 1.2rem',
                                     borderRadius: '20px', fontWeight: 'bold', fontSize: '0.92rem',
                                     marginBottom: '0.8rem'
@@ -876,13 +877,13 @@ const RecitationModal = ({
                                                     onClick={() => handleGradeSelect(grade)}
                                                     disabled={submitting || readOnly}
                                                     style={{
-                                                        backgroundColor: grade.color_code || '#558b2f',
+                                                        backgroundColor: resolveGradeColor(grade.color_code),
                                                         color: '#fff',
                                                         border: isCurrentGrade
                                                             ? '3px solid #fff'
                                                             : '3px solid transparent',
                                                         outline: isCurrentGrade
-                                                            ? `2px solid ${grade.color_code || '#558b2f'}`
+                                                            ? `2px solid ${resolveGradeColor(grade.color_code)}`
                                                             : 'none',
                                                         outlineOffset: '1px',
                                                         padding: '0.85rem',
@@ -902,7 +903,7 @@ const RecitationModal = ({
                                                             padding: '1px', display: 'flex'
                                                         }}>
                                                             <CheckCircle size={16}
-                                                                color={grade.color_code || '#558b2f'}
+                                                                color={resolveGradeColor(grade.color_code)}
                                                                 weight="fill" />
                                                         </span>
                                                     )}

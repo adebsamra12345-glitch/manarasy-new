@@ -1,0 +1,61 @@
+# قواعد تنبيه وكيل منارة (Prometheus). المقاييس من orchestrator على /metrics.
+# أي تنبيه canary حرج => الإجراء الأول: AGENT_CANARY_PERCENT=0 ثم إعادة تشغيل orchestrator (انظر docs/GPU_V3_RUNBOOK.md).
+groups:
+  - name: manarasy-agent
+    rules:
+      - alert: AgentCanaryFallbackHigh
+        expr: |
+          sum(rate(agent_variant_total{variant="canary",event="canary_fallback"}[10m]))
+            / clamp_min(sum(rate(agent_variant_total{variant="canary",event="request"}[10m])), 0.0001) > 0.05
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "أكثر من 5% من طلبات المحوّل التجريبي تسقط إلى المستقر"
+          action: "أوقف التجربة: AGENT_CANARY_PERCENT=0"
+
+      - alert: AgentCanaryCircuitOpen
+        expr: orchestrator_circuit_breaker_state{service="vllm_canary"} == 2
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "قاطع المحوّل التجريبي مفتوح (يعمل المستقر وحده)"
+
+      - alert: AgentErrorRateHigh
+        expr: |
+          sum(rate(agent_variant_total{event="error"}[10m]))
+            / clamp_min(sum(rate(agent_variant_total{event="request"}[10m])), 0.0001) > 0.05
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "أكثر من 5% من طلبات الوكيل تفشل (النموذج غير متاح)"
+
+      - alert: AgentLatencyHigh
+        expr: |
+          rate(agent_variant_latency_ms_sum[10m]) / clamp_min(rate(agent_variant_latency_ms_count[10m]), 0.0001) > 8000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "متوسط زمن الوكيل {{ $labels.variant }} أعلى من 8 ثوانٍ"
+
+      - alert: AgentCanaryLatencyRegression
+        expr: |
+          (rate(agent_variant_latency_ms_sum{variant="canary"}[15m]) / clamp_min(rate(agent_variant_latency_ms_count{variant="canary"}[15m]), 0.0001))
+            > 1.5 * (rate(agent_variant_latency_ms_sum{variant="stable"}[15m]) / clamp_min(rate(agent_variant_latency_ms_count{variant="stable"}[15m]), 0.0001))
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "المحوّل التجريبي أبطأ من المستقر بأكثر من 50%"
+
+      - alert: AgentVllmCircuitOpen
+        expr: orchestrator_circuit_breaker_state{service="vllm"} == 2
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "قاطع vLLM مفتوح: المساعد يعمل بالرسالة البديلة"
+
+      - alert: AgentInjectionSpike
+        expr: rate(orchestrator_prompt_injection_flags_total[15m]) > 0.2
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "ارتفاع محاولات حقن التعليمات"

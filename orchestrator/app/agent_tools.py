@@ -1,4 +1,6 @@
 """أدوات الوكيل الصوتي/النصي لمنصة منارة مع تأكيد إلزامي قبل أي عملية كتابة."""
+import copy
+import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -10,13 +12,15 @@ from fastapi import HTTPException
 
 from .agent_backend import BackendError, Principal, get_backend
 from .arabic import normalize, parse_confirmation
+from .screen_data import ALL_SCREEN_IDS, screen_ids_for_role
 from .security import scrub_sensitive_dict
+from .state_store import store
 
 STATUS_AR = {"present": "حضور", "absent": "غياب", "late": "تأخر", "excused": "غياب بعذر"}
 CONFIRM_TTL = 60
 
-_pending: dict[str, dict] = {}
-_done: dict[str, dict] = {}
+_PENDING_TTL = CONFIRM_TTL * 5  # أطول من المهلة ليظهر رد «انتهت المهلة» بدل «لا يوجد معلّق»
+_DONE_TTL = 600
 
 ROLE_MAPPING = {
     "TENANT_ADMIN": "manager",
@@ -74,14 +78,19 @@ def resolve_halaqa(p: Principal, query: str) -> dict:
     if not q:
         raise NeedClarification("اسم الحلقة", "لم أفهم اسم الحلقة، هل تعيد الاسم من فضلك؟")
     token = normalize("حلقة")
-    q_core = q.replace(token, "").strip() or q
+
+    def _no_al(text: str) -> str:
+        # «ال» التعريف تُضخّم التشابه بين كلمات لا علاقة لها (القديمة ~ البقرة)
+        return " ".join(w[2:] if w.startswith("ال") and len(w) > 4 else w for w in text.split())
+
+    q_core = _no_al(q.replace(token, "").strip() or q)
     halaqat = get_backend().halaqat(p)
     if not halaqat:
         raise NeedClarification(query, "لا توجد حلقات متاحة ضمن نطاقك.")
     scored = []
     for h in halaqat:
         h_norm = normalize(h["name"])
-        h_core = h_norm.replace(token, "").strip() or h_norm
+        h_core = _no_al(h_norm.replace(token, "").strip() or h_norm)
         score = SequenceMatcher(None, q_core, h_core).ratio()
         if q_core in h_core.split() or h_core in q_core.split():
             score = max(score, 0.8)
@@ -171,6 +180,18 @@ def halaqa_overview(p: Principal, a: dict):
     return scrub_sensitive_dict(get_backend().overview(p))
 
 
+def ui_tool_enabled() -> bool:
+    """أداة open_screen للنموذج مفعّلة فقط مع محوّل v3 المدرَّب عليها (AGENT_UI_TOOL=1)؛
+    الموجّه الحتمي في screens.py يعمل دائماً بدونها."""
+    return os.getenv("AGENT_UI_TOOL", "0") == "1"
+
+
+def open_screen(p: Principal, a: dict):
+    from .screens import open_screen_tool  # استيراد متأخر: screens يستورد هذا الملف
+
+    return open_screen_tool(p, a)
+
+
 def _obj(props, req):
     return {"type": "object", "properties": props, "required": req}
 
@@ -253,6 +274,24 @@ TOOLS: dict[str, Tool] = {
             lambda p, a: f"سأعتمد طلب التسجيل رقم {a['request_id']}",
         ),
         Tool(
+            "open_screen",
+            "فتح تبويب أو شاشة في المنصة أو الانتقال إليها (تنقل داخل الواجهة): الطلاب، الحلقات، الجلسات، الملف الشخصي، "
+            "الحضور، التسميع، جلسات حلقة محددة (halaqa_sessions)، بدء جلسة تسميع جديدة (start_session)، "
+            "معلومات طالب (student_profile)، تغيير كلمة المرور (change_password)، تسجيل الخروج (logout). "
+            "لا تسأل المستخدم عمّا يريده من التبويب؛ انتقل إليه مباشرة.",
+            _obj(
+                {
+                    "screen": {"type": "string", "enum": ALL_SCREEN_IDS},
+                    "halaqa_query": {"type": "string", "description": "اسم الحلقة إن ذكره المستخدم"},
+                    "student_query": _SQ,
+                },
+                ["screen"],
+            ),
+            _BOTH,
+            False,
+            open_screen,
+        ),
+        Tool(
             "list_students",
             "عرض طلاب حلقة",
             _obj({"halaqa_query": {"type": "string", "description": "اسم الحلقة"}}, ["halaqa_query"]),
@@ -314,13 +353,19 @@ def map_agent_role(raw_role: str) -> str:
     return agent_role
 
 
-def specs_for(role: str) -> list:
+def specs_for(role: str, ui_tool: bool | None = None) -> list:
+    """ui_tool: None = العلم العام AGENT_UI_TOOL؛ True/False = قرار المجموعة (canary/مستقر)."""
     agent_role = map_agent_role(role)
-    out = [
-        {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
-        for t in TOOLS.values()
-        if agent_role in t.roles
-    ]
+    ui_on = ui_tool_enabled() if ui_tool is None else ui_tool
+    out = []
+    for t in TOOLS.values():
+        if agent_role not in t.roles or (t.name == "open_screen" and not ui_on):
+            continue
+        params = t.parameters
+        if t.name == "open_screen":  # تبويبات الدور الحقيقي فقط
+            params = copy.deepcopy(params)
+            params["properties"]["screen"]["enum"] = screen_ids_for_role((role or "").upper())
+        out.append({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": params}})
     return out + [CLARIFY_SPEC]
 
 
@@ -349,7 +394,7 @@ def _run_tool(p: Principal, tool: Tool, args: dict) -> dict:
         return _backend_error(e)
 
 
-def execute_tool_call(p: Principal, name: str, args: dict) -> dict:
+def execute_tool_call(p: Principal, name: str, args: dict, ui_tool: bool | None = None) -> dict:
     agent_role = map_agent_role(p.role)
     p_scoped = Principal(p.user_id, agent_role, p.tenant_id, p.halaqat_ids, p.forward_headers)
 
@@ -362,7 +407,7 @@ def execute_tool_call(p: Principal, name: str, args: dict) -> dict:
         }
 
     tool = TOOLS.get(name)
-    if not tool or agent_role not in tool.roles:
+    if not tool or agent_role not in tool.roles or (name == "open_screen" and not (ui_tool_enabled() if ui_tool is None else ui_tool)):
         raise HTTPException(status_code=404, detail="unknown tool")
 
     try:
@@ -386,14 +431,20 @@ def execute_tool_call(p: Principal, name: str, args: dict) -> dict:
         return _backend_error(e)
 
     token = secrets.token_urlsafe(16)
-    _pending[token] = {
-        "uid": p_scoped.user_id,
-        "tenant": p_scoped.tenant_id,
-        "principal": p_scoped,
-        "tool": name,
-        "args": args,
-        "exp": time.time() + CONFIRM_TTL,
-    }
+    # لا نخزّن JWT المستخدم: يُعاد بناء الهوية عند التأكيد من طلب التأكيد نفسه
+    store.set(
+        f"pending:{token}",
+        {
+            "uid": p_scoped.user_id,
+            "tenant": p_scoped.tenant_id,
+            "role": p_scoped.role,
+            "halaqat_ids": list(p_scoped.halaqat_ids or []),
+            "tool": name,
+            "args": args,
+            "exp": time.time() + CONFIRM_TTL,
+        },
+        _PENDING_TTL,
+    )
     return {
         "status": "confirm_required",
         "confirm_token": token,
@@ -402,20 +453,23 @@ def execute_tool_call(p: Principal, name: str, args: dict) -> dict:
 
 
 def confirm_tool_call(p: Principal, token: str, utterance: str, idempotency_key: str | None = None) -> dict:
-    if idempotency_key and idempotency_key in _done:
-        return _done[idempotency_key]
+    idem_key = f"done:{p.tenant_id}:{p.user_id}:{idempotency_key}" if idempotency_key else None
+    if idem_key:
+        cached = store.get(idem_key)
+        if cached is not None:
+            return cached
 
-    pend = _pending.get(token)
+    pend = store.get(f"pending:{token}")
     if not pend or pend["uid"] != p.user_id or pend["tenant"] != p.tenant_id:
         raise HTTPException(status_code=404, detail="no pending action")
 
     if time.time() > pend["exp"]:
-        _pending.pop(token, None)
+        store.delete(f"pending:{token}")
         return {"status": "expired", "speak": "انتهت مهلة التأكيد، أعد الطلب من فضلك."}
 
     verdict = parse_confirmation(utterance)
     if verdict == "no":
-        _pending.pop(token, None)
+        store.delete(f"pending:{token}")
         return {"status": "cancelled", "speak": "تم إلغاء العملية."}
     if verdict == "unclear":
         return {
@@ -424,11 +478,11 @@ def confirm_tool_call(p: Principal, token: str, utterance: str, idempotency_key:
             "speak": "لم أفهم ردك، هل أؤكد التنفيذ؟ قل نعم أو لا.",
         }
 
-    _pending.pop(token, None)
-    out = _run_tool(pend["principal"], TOOLS[pend["tool"]], pend["args"])
+    store.delete(f"pending:{token}")
+    principal = Principal(pend["uid"], pend["role"], pend["tenant"], pend["halaqat_ids"], p.forward_headers)
+    out = _run_tool(principal, TOOLS[pend["tool"]], pend["args"])
     if out["status"] == "ok":
         out["speak"] = "تم التنفيذ."
-    if idempotency_key:
-        _done[idempotency_key] = out
+    if idem_key:
+        store.set(idem_key, out, _DONE_TTL)
     return out
-

@@ -1120,6 +1120,12 @@ def change_password_view(request):
 
     if len(new_password) < 6:
         return JsonResponse({"status": "error", "message": "يجب أن تكون كلمة المرور الجديدة 6 أحرف على الأقل"}, status=400)
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as e:
+        return JsonResponse({"status": "error", "message": "كلمة المرور غير مستوفية لشروط الأمان", "details": e.messages}, status=400)
 
     if not check_password(current_password, user.password):
         return JsonResponse({"status": "error", "message": "كلمة المرور الحالية غير صحيحة"}, status=400)

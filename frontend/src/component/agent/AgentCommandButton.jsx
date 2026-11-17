@@ -1,11 +1,54 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Microphone, PaperPlaneRight, X, Sparkle, WarningCircle, CircleNotch } from '@phosphor-icons/react';
+import { Microphone, PaperPlaneRight, X, Sparkle, WarningCircle, CircleNotch, ArrowCounterClockwise, SpeakerHigh, SpeakerSlash, ThumbsUp, ThumbsDown } from '@phosphor-icons/react';
 import { useAuthContext } from '../../context/AuthContext';
-import { sendAgentMessage, confirmAgentAction, transcribeAudioCommand } from '../../services/api/agentService';
+import {
+    sendAgentMessage,
+    confirmAgentAction,
+    transcribeAudioCommand,
+    sendAgentFeedback,
+    fetchAgentSpeech,
+    getAgentSettings,
+    deleteAgentHistory,
+} from '../../services/api/agentService';
 import ChangePasswordModal from '../common/ChangePasswordModal';
-import { ROLE_PREFIX, runUiAction } from './uiActions';
+import { ROLE_PREFIX, runUiAction, parseYesNo } from './uiActions';
+import { speak, speakServer, cancelSpeech, isTtsSupported } from './tts';
 import './agentCommand.css';
+
+const STORAGE_KEY = 'manarasy_agent_chat_v1';
+const MAX_MESSAGES = 50;
+const MUTE_KEY = 'manarasy_agent_muted';
+
+const loadMuted = () => {
+    try {
+        return localStorage.getItem(MUTE_KEY) === '1';
+    } catch {
+        return false;
+    }
+};
+
+/** استرجاع المحادثة الحالية من sessionStorage (تبقى عند إعادة تحميل الصفحة داخل نفس التبويب) */
+const loadChat = () => {
+    try {
+        const o = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null');
+        if (!o) return { messages: [], sessionId: '' };
+        return {
+            messages: Array.isArray(o.messages) ? o.messages.slice(-MAX_MESSAGES) : [],
+            sessionId: typeof o.sessionId === 'string' ? o.sessionId : '',
+        };
+    } catch {
+        return { messages: [], sessionId: '' };
+    }
+};
+
+const clearStoredChat = () => {
+    try {
+        sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+        // تجاهل
+    }
+};
 
 /**
  * 1. فحص السياق الآمن (HTTPS أو Localhost) المطلوب لتمكين واجهات الصوت البرمجية
@@ -57,12 +100,18 @@ const AgentCommandButton = () => {
     const [busy, setBusy] = useState(false);
     const [listening, setListening] = useState(false);
     const [recordMode, setRecordMode] = useState('idle'); // 'idle' | 'web-speech' | 'media-recorder'
-    const [msg, setMsg] = useState(null);
+    const [messages, setMessages] = useState(() => loadChat().messages);
+    const messagesEndRef = useRef(null);
+    const [muted, setMuted] = useState(loadMuted);
+    const [speaking, setSpeaking] = useState(false);
+    const mutedRef = useRef(muted);
+    const noVoiceWarnedRef = useRef(false);
+    const answerRef = useRef(null);
     const [choices, setChoices] = useState(null); // خيارات قابلة للضغط من الوكيل
     const [confirmUi, setConfirmUi] = useState(null); // تأكيد إجراء واجهة (خروج/بدء جلسة)
     const [serverConfirm, setServerConfirm] = useState(null); // تأكيد عملية كتابة معلّقة في الخادم
     const [modal, setModal] = useState(null);
-    const sessionIdRef = useRef('');
+    const sessionIdRef = useRef(loadChat().sessionId);
     const runRef = useRef(null);
 
     // مراجع دورة الحياة والأمان لتفادي تسريب الذاكرة والـ Race Conditions
@@ -74,6 +123,115 @@ const AgentCommandButton = () => {
     const isMountedRef = useRef(true);
 
     const prefix = ROLE_PREFIX[(role || '').toLowerCase()];
+
+    const appendMessage = useCallback((from, kind, content, extra = {}) => {
+        setMessages((prev) => [
+            ...prev.slice(-(MAX_MESSAGES - 1)),
+            { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, from, kind, text: content, ...extra },
+        ]);
+    }, []);
+
+    // إعدادات الخصوصية لعرض إشعار الشفافية (مرة عند فتح اللوحة)
+    const [privacy, setPrivacy] = useState(null);
+    useEffect(() => {
+        if (!open || privacy) return undefined;
+        let cancelled = false;
+        getAgentSettings()
+            .then((d) => !cancelled && setPrivacy(d))
+            .catch(() => !cancelled && setPrivacy({ training_consent: false, retention_days: 180 }));
+        return () => { cancelled = true; };
+    }, [open, privacy]);
+
+    const rate = useCallback(async (messageId, rating) => {
+        setMessages((prev) => prev.map((m) => (m.messageId === messageId ? { ...m, rating } : m)));
+        try {
+            await sendAgentFeedback(messageId, rating);
+        } catch {
+            setMessages((prev) => prev.map((m) => (m.messageId === messageId ? { ...m, rating: 0 } : m)));
+        }
+    }, []);
+
+    const clearHistory = useCallback(async () => {
+        if (!window.confirm('سيُحذف سجل محادثاتك مع المساعد نهائياً. هل تريد المتابعة؟')) return;
+        try {
+            await deleteAgentHistory();
+            sessionIdRef.current = '';
+            clearStoredChat();
+            setMessages([]);
+        } catch {
+            setMsg({ kind: 'err', text: 'تعذر حذف السجل، حاول لاحقاً.' });
+        }
+    }, [setMsg]);
+
+    // رسائل المساعد (setMsg(null) لا يفعل شيئاً: السجل يبقى)
+    const setMsg = useCallback(
+        (m) => {
+            if (m && m.text) appendMessage('assistant', m.kind || 'info', m.text);
+        },
+        [appendMessage]
+    );
+
+    /** يقرأ الرد صوتياً (فقط عند سؤال صوتي ولم يكتم المستخدم الصوت) */
+    const speakReply = useCallback(async (reply) => {
+        if (!reply || mutedRef.current) return;
+        const handlers = {
+            onStart: () => isMountedRef.current && setSpeaking(true),
+            onEnd: () => isMountedRef.current && setSpeaking(false),
+        };
+        // 1) صوت الخادم إن فُعّل؛ 2) عند أي فشل نرجع لصوت المتصفح
+        if (privacy?.tts_server) {
+            try {
+                const blob = await fetchAgentSpeech(reply);
+                if (!mutedRef.current && (await speakServer(blob, handlers)) === 'spoken') return;
+            } catch {
+                // نكمل بصوت المتصفح
+            }
+        }
+        if (!isTtsSupported()) return;
+        const r = await speak(reply, handlers);
+        if (r === 'no_voice' && !noVoiceWarnedRef.current && isMountedRef.current) {
+            noVoiceWarnedRef.current = true;
+            setMsg({ kind: 'info', text: 'لا يوجد صوت عربي مثبّت على جهازك، لذلك سأكتفي بالرد المكتوب.' });
+        }
+    }, [setMsg, privacy]);
+
+    const toggleMute = useCallback(() => {
+        const next = !mutedRef.current;
+        mutedRef.current = next;
+        setMuted(next);
+        try {
+            localStorage.setItem(MUTE_KEY, next ? '1' : '0');
+        } catch {
+            // تجاهل
+        }
+        if (next) {
+            cancelSpeech();
+            setSpeaking(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        try {
+            sessionStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify({ messages, sessionId: sessionIdRef.current })
+            );
+        } catch {
+            // تجاهل: التخزين غير متاح
+        }
+        if (messagesEndRef.current?.scrollIntoView) {
+            messagesEndRef.current.scrollIntoView({ block: 'end' });
+        }
+    }, [messages, open]);
+
+    const newConversation = useCallback(() => {
+        sessionIdRef.current = '';
+        clearStoredChat();
+        setMessages([]);
+        setChoices(null);
+        setConfirmUi(null);
+        setServerConfirm(null);
+    }, []);
 
     /**
      * إيقاف وتنظيف جميع موارد التسجيل (Web Speech + MediaRecorder + Stream Tracks)
@@ -128,6 +286,7 @@ const AgentCommandButton = () => {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
+            cancelSpeech();
             stopAllRecordings();
         };
     }, [stopAllRecordings]);
@@ -145,6 +304,8 @@ const AgentCommandButton = () => {
                 }, 800);
             },
             logout: () => {
+                clearStoredChat();
+                setMessages([]);
                 logout();
                 navigate('/login', { replace: true });
             },
@@ -160,28 +321,55 @@ const AgentCommandButton = () => {
             },
         };
         (actions || []).forEach((a) => runUiAction(a, { prefix, handlers }));
-    }, [navigate, logout, prefix]);
+    }, [navigate, logout, prefix, setMsg]);
 
     /**
      * إرسال الرسالة إلى وكيل منارة (محادثة بجلسة) وتنفيذ ما يرجع
      */
-    const run = useCallback(async (value) => {
+    const run = useCallback(async (value, channel = 'text') => {
         const q = (value || '').trim();
         if (!q) return;
 
+        cancelSpeech(); // barge-in: أي كلام جديد يقطع القراءة الجارية
+        setSpeaking(false);
+
+        // رد «نعم/لا» قصير على تأكيد معلّق يُعالج محلياً دون المرور بالنموذج
+        const yn = parseYesNo(q);
+        if (yn && (serverConfirm || confirmUi)) {
+            appendMessage('user', 'text', q);
+            setText('');
+            if (serverConfirm) {
+                answerRef.current?.(yn === 'yes' ? 'نعم' : 'لا', channel);
+            } else {
+                const c = confirmUi;
+                setConfirmUi(null);
+                if (yn === 'yes') {
+                    applyActions(c.onConfirm);
+                } else {
+                    setMsg({ kind: 'info', text: 'تم الإلغاء.' });
+                    if (channel === 'voice') speakReply('تم الإلغاء.');
+                }
+            }
+            return;
+        }
+
         setBusy(true);
-        setMsg(null);
+        appendMessage('user', 'text', q);
+        setText('');
         setChoices(null);
         setConfirmUi(null);
         setServerConfirm(null);
 
         try {
-            const res = await sendAgentMessage(q, sessionIdRef.current);
+            const res = await sendAgentMessage(q, sessionIdRef.current, channel);
             if (!isMountedRef.current) return;
 
             if (res.session_id) sessionIdRef.current = res.session_id;
             if (res.answer) {
-                setMsg({ kind: res.ai_available === false ? 'err' : 'info', text: res.answer });
+                appendMessage('assistant', res.ai_available === false ? 'err' : 'info', res.answer, {
+                    messageId: res.message_id || undefined,
+                });
+                if (channel === 'voice') speakReply(res.answer);
             }
             if (res.confirm_required?.confirm_token) {
                 setServerConfirm({
@@ -194,13 +382,14 @@ const AgentCommandButton = () => {
             if (isMountedRef.current) {
                 const errMsg = err.response?.data?.message || 'تعذّر الاتصال بالمساعد الذكي حالياً.';
                 setMsg({ kind: 'err', text: errMsg });
+                if (channel === 'voice') speakReply(errMsg);
             }
         } finally {
             if (isMountedRef.current) {
                 setBusy(false);
             }
         }
-    }, [applyActions]);
+    }, [applyActions, appendMessage, setMsg, speakReply, serverConfirm, confirmUi]);
 
     useEffect(() => {
         runRef.current = run;
@@ -209,7 +398,7 @@ const AgentCommandButton = () => {
     /**
      * رد المستخدم (نعم/لا) على عملية كتابة معلّقة في الخادم
      */
-    const answerServerConfirm = useCallback(async (utterance) => {
+    const answerServerConfirm = useCallback(async (utterance, channel = 'text') => {
         const pending = serverConfirm;
         if (!pending) return;
         setServerConfirm(null);
@@ -222,6 +411,7 @@ const AgentCommandButton = () => {
                 setServerConfirm({ token: res.confirm_token, text: res.speak });
             }
             setMsg({ kind: res.status === 'ok' ? 'ok' : 'info', text: res.speak || 'تم.' });
+            if (channel === 'voice') speakReply(res.speak || 'تم.');
         } catch (err) {
             if (isMountedRef.current) {
                 setMsg({ kind: 'err', text: err.response?.data?.message || 'تعذّر إكمال العملية.' });
@@ -229,7 +419,11 @@ const AgentCommandButton = () => {
         } finally {
             if (isMountedRef.current) setBusy(false);
         }
-    }, [serverConfirm]);
+    }, [serverConfirm, setMsg, speakReply]);
+
+    useEffect(() => {
+        answerRef.current = answerServerConfirm;
+    }, [answerServerConfirm]);
 
     /**
      * طلب أذونات الميكروفون صراحة من المتصفح لضمان ظهور نافذة الإذن للمستخدم
@@ -281,12 +475,14 @@ const AgentCommandButton = () => {
             }
             return null;
         }
-    }, []);
+    }, [setMsg]);
 
     /**
      * تشغيل التسجيل الصوتي عبر MediaRecorder وإرسال الملف للخادم
      */
     const startMediaRecorderFallback = useCallback(async (existingStream = null) => {
+        cancelSpeech();
+        setSpeaking(false);
         stopAllRecordings();
 
         let stream = existingStream;
@@ -350,7 +546,7 @@ const AgentCommandButton = () => {
 
                     if (transcribed && transcribed.trim()) {
                         setText(transcribed.trim());
-                        await run(transcribed.trim());
+                        await run(transcribed.trim(), 'voice');
                     } else {
                         setMsg({
                             kind: 'err',
@@ -392,12 +588,14 @@ const AgentCommandButton = () => {
                 setMsg({ kind: 'err', text: 'تعذر تهيئة المسجل الصوتي الداخلي.' });
             }
         }
-    }, [stopAllRecordings, requestMicrophonePermission, run]);
+    }, [stopAllRecordings, requestMicrophonePermission, run, setMsg]);
 
     /**
      * تشغيل Web Speech API أو التحول الفوري لـ MediaRecorder
      */
     const startWebSpeech = useCallback(async () => {
+        cancelSpeech(); // لا نسجّل صوت المساعد نفسه
+        setSpeaking(false);
         // طلب إذن الميكروفون مرة واحدة فقط (يُظهر نافذة السماح للمستخدم)
         const stream = await requestMicrophonePermission();
         if (!stream) return;
@@ -458,7 +656,7 @@ const AgentCommandButton = () => {
                     }
                     setListening(false);
                     setRecordMode('idle');
-                    run(finalTranscript.trim());
+                    run(finalTranscript.trim(), 'voice');
                 }
             };
 
@@ -504,7 +702,7 @@ const AgentCommandButton = () => {
         } catch (e) {
             startMediaRecorderFallback();
         }
-    }, [requestMicrophonePermission, stopAllRecordings, startMediaRecorderFallback, recordMode, run]);
+    }, [requestMicrophonePermission, stopAllRecordings, startMediaRecorderFallback, recordMode, run, setMsg]);
 
     /**
      * زر التبديل الرئيسي للميكروفون
@@ -530,7 +728,7 @@ const AgentCommandButton = () => {
         }
 
         startWebSpeech();
-    }, [listening, recordMode, stopAllRecordings, startWebSpeech]);
+    }, [listening, recordMode, stopAllRecordings, startWebSpeech, setMsg]);
 
     if (!prefix) return null;
 
@@ -555,67 +753,81 @@ const AgentCommandButton = () => {
                         {recordMode === 'media-recorder' && (
                             <span className="agent-mode-badge fallback">مسجل المنصة الداخلي</span>
                         )}
-                    </div>
-
-                    <form
-                        className="agent-row"
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            run(text);
-                        }}
-                    >
+                        {(isTtsSupported() || privacy?.tts_server) && (
+                            <button
+                                type="button"
+                                className={`agent-new-chat agent-speaker ${speaking ? 'speaking' : ''}`}
+                                onClick={toggleMute}
+                                title={muted ? 'تشغيل قراءة الردود' : 'كتم قراءة الردود'}
+                                aria-label={muted ? 'تشغيل قراءة الردود' : 'كتم قراءة الردود'}
+                                aria-pressed={!muted}
+                            >
+                                {muted ? <SpeakerSlash size={16} weight="bold" /> : <SpeakerHigh size={16} weight="bold" />}
+                            </button>
+                        )}
                         <button
                             type="button"
-                            className={`agent-mic ${listening ? 'on' : ''} ${
-                                recordMode === 'media-recorder' ? 'fallback-active' : ''
-                            }`}
-                            onClick={toggleMic}
-                            disabled={busy}
-                            aria-label={listening ? 'إيقاف التسجيل' : 'تحدث الآن'}
-                            title={listening ? 'إيقاف التسجيل' : 'تحدث بالصوت'}
+                            className="agent-new-chat"
+                            onClick={newConversation}
+                            disabled={busy || messages.length === 0}
+                            title="محادثة جديدة"
+                            aria-label="محادثة جديدة"
                         >
-                            <Microphone size={20} weight={listening ? 'fill' : 'bold'} />
+                            <ArrowCounterClockwise size={16} weight="bold" />
                         </button>
+                    </div>
 
-                        <input
-                            value={text}
-                            onChange={(e) => setText(e.target.value)}
-                            placeholder={
-                                listening
-                                    ? recordMode === 'media-recorder'
-                                        ? 'أستمع إليك عبر مسجل المنصة...'
-                                        : 'أستمع إليك الآن... قل أمرك'
-                                    : 'اكتب أو قل أمرك: افتح التسميع'
-                            }
-                            disabled={busy}
-                            autoFocus
-                        />
+                    <div className="agent-messages" role="log" aria-live="polite">
+                        {messages.length === 0 && (
+                            <div className="agent-empty">
+                                مرحباً، أنا مساعد منارة. اطلب مني فتح تبويب، أو معلومات طالب، أو تسجيل حضور...
+                            </div>
+                        )}
+                        {messages.map((m) => (
+                            <div
+                                key={m.id}
+                                className={`agent-bubble ${m.from === 'user' ? 'user' : `bot ${m.kind || 'info'}`}`}
+                            >
+                                {m.kind === 'err' && (
+                                    <WarningCircle
+                                        size={16}
+                                        weight="fill"
+                                        style={{ marginInlineEnd: 6, verticalAlign: 'text-bottom' }}
+                                    />
+                                )}
+                                {m.text}
+                                {m.from === 'assistant' && m.messageId && (
+                                    <span className="agent-rate">
+                                        <button
+                                            type="button"
+                                            className={m.rating === 1 ? 'on' : ''}
+                                            aria-label="رد مفيد"
+                                            aria-pressed={m.rating === 1}
+                                            onClick={() => rate(m.messageId, 1)}
+                                        >
+                                            <ThumbsUp size={14} weight={m.rating === 1 ? 'fill' : 'regular'} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={m.rating === -1 ? 'on bad' : ''}
+                                            aria-label="رد غير مفيد"
+                                            aria-pressed={m.rating === -1}
+                                            onClick={() => rate(m.messageId, -1)}
+                                        >
+                                            <ThumbsDown size={14} weight={m.rating === -1 ? 'fill' : 'regular'} />
+                                        </button>
+                                    </span>
+                                )}
+                            </div>
+                        ))}
+                        <div ref={messagesEndRef} />
+                    </div>
 
-                        <button
-                            type="submit"
-                            className="agent-send"
-                            disabled={busy || !text.trim()}
-                            aria-label="إرسال"
-                            title="إرسال"
-                        >
-                            {busy ? (
-                                <CircleNotch size={18} weight="bold" className="agent-spin" />
-                            ) : (
-                                <PaperPlaneRight size={18} weight="fill" />
-                            )}
-                        </button>
-                    </form>
-
-                    {msg && (
-                        <div className={`agent-msg ${msg.kind}`}>
-                            {msg.kind === 'err' && (
-                                <WarningCircle
-                                    size={16}
-                                    weight="fill"
-                                    style={{ marginInlineEnd: 6, verticalAlign: 'text-bottom' }}
-                                />
-                            )}
-                            {msg.text}
+                    {privacy && (
+                        <div className="agent-privacy">
+                            تُحفظ محادثاتك {privacy.retention_days || 180} يوماً بعد إخفاء البيانات الشخصية
+                            {privacy.training_consent ? '، ويُستخدم المراجَع منها لتحسين المساعد.' : '، ولا تُستخدم لتدريبه.'}{' '}
+                            <button type="button" onClick={clearHistory}>حذف سجلي</button>
                         </div>
                     )}
 
@@ -677,6 +889,54 @@ const AgentCommandButton = () => {
                             </button>
                         </div>
                     )}
+                    <form
+                        className="agent-row"
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            run(text);
+                        }}
+                    >
+                        <button
+                            type="button"
+                            className={`agent-mic ${listening ? 'on' : ''} ${
+                                recordMode === 'media-recorder' ? 'fallback-active' : ''
+                            }`}
+                            onClick={toggleMic}
+                            disabled={busy}
+                            aria-label={listening ? 'إيقاف التسجيل' : 'تحدث الآن'}
+                            title={listening ? 'إيقاف التسجيل' : 'تحدث بالصوت'}
+                        >
+                            <Microphone size={20} weight={listening ? 'fill' : 'bold'} />
+                        </button>
+
+                        <input
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            placeholder={
+                                listening
+                                    ? recordMode === 'media-recorder'
+                                        ? 'أستمع إليك عبر مسجل المنصة...'
+                                        : 'أستمع إليك الآن... قل أمرك'
+                                    : 'اكتب أو قل أمرك: افتح التسميع'
+                            }
+                            disabled={busy}
+                            autoFocus
+                        />
+
+                        <button
+                            type="submit"
+                            className="agent-send"
+                            disabled={busy || !text.trim()}
+                            aria-label="إرسال"
+                            title="إرسال"
+                        >
+                            {busy ? (
+                                <CircleNotch size={18} weight="bold" className="agent-spin" />
+                            ) : (
+                                <PaperPlaneRight size={18} weight="fill" />
+                            )}
+                        </button>
+                    </form>
                 </div>
             )}
 

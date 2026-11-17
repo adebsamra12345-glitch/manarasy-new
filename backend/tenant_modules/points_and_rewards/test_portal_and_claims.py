@@ -64,18 +64,26 @@ def run_tests():
             center=center
         )
 
-    # 2. Setup Student
-    student = Student.objects.using(db_name).first()
-    if not student:
-        student = Student.objects.using(db_name).create(
-            full_name="طالب تجريبي للاختبار",
-            national_id=f"STD-{uuid.uuid4().hex[:6]}",
-            points=150,
-            halaqa=halaqa
-        )
-    else:
-        student.points = 150
-        student.save(using=db_name, update_fields=['points'])
+    # 2. Setup Isolated Test Student
+    student, _ = Student.objects.using(db_name).get_or_create(
+        national_id='qa_claims_test_student',
+        defaults={
+            'full_name': 'طالب فحص البوابة والمطالبات',
+            'points': 150,
+            'halaqa': halaqa
+        }
+    )
+    PointTransaction.objects.using(db_name).filter(student=student).delete()
+    student.points = 150
+    student.save(using=db_name, update_fields=['points'])
+    PointTransaction.objects.using(db_name).create(
+        student=student,
+        amount=150,
+        transaction_type='MANUAL_ADJUSTMENT',
+        reason='رصيد تجريبي لاختبار البوابة والمطالبات',
+        balance_before=0,
+        balance_after=150
+    )
 
     # 3. Setup Reward
     reward = Reward.objects.using(db_name).create(

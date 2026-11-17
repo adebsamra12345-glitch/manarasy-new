@@ -1,0 +1,724 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "id": "NAV-T01",
+   "role": "TEACHER",
+   "steps": [
+    "انقلني إلى تبويب الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T02",
+   "role": "TEACHER",
+   "steps": [
+    "خذني لتبويب الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T03",
+   "role": "TEACHER",
+   "steps": [
+    "افتح لي تبويب الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T04",
+   "role": "TEACHER",
+   "steps": [
+    "روح عالطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T05",
+   "role": "TEACHER",
+   "steps": [
+    "وديني لصفحة الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T06",
+   "role": "TEACHER",
+   "steps": [
+    "الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T07",
+   "role": "TEACHER",
+   "steps": [
+    "افتح لي جلسة الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T08",
+   "role": "TEACHER",
+   "steps": [
+    "افتح قائمة الطلاب"
+   ],
+   "expect": {
+    "navigate": "/teacher/students"
+   }
+  },
+  {
+   "id": "NAV-T09",
+   "role": "TEACHER",
+   "steps": [
+    "انقلني الى تبويب الملف الشخصي"
+   ],
+   "expect": {
+    "navigate": "/teacher/profile"
+   }
+  },
+  {
+   "id": "NAV-T10",
+   "role": "TEACHER",
+   "steps": [
+    "افتح ملفي الشخصي"
+   ],
+   "expect": {
+    "navigate": "/teacher/profile"
+   }
+  },
+  {
+   "id": "NAV-T11",
+   "role": "TEACHER",
+   "steps": [
+    "خذني إلى حسابي"
+   ],
+   "expect": {
+    "navigate": "/teacher/profile"
+   }
+  },
+  {
+   "id": "NAV-T12",
+   "role": "TEACHER",
+   "steps": [
+    "بدي افتح الملف الشخصي"
+   ],
+   "expect": {
+    "navigate": "/teacher/profile"
+   }
+  },
+  {
+   "id": "NAV-T13",
+   "role": "TEACHER",
+   "steps": [
+    "انقلني الى الحلقات"
+   ],
+   "expect": {
+    "navigate": "/teacher/rings"
+   }
+  },
+  {
+   "id": "NAV-T14",
+   "role": "TEACHER",
+   "steps": [
+    "افتح حلقاتي"
+   ],
+   "expect": {
+    "navigate": "/teacher/rings"
+   }
+  },
+  {
+   "id": "NAV-T15",
+   "role": "TEACHER",
+   "steps": [
+    "افتح تبويب الحضور"
+   ],
+   "expect": {
+    "navigate": "/teacher/attendance"
+   }
+  },
+  {
+   "id": "NAV-T16",
+   "role": "TEACHER",
+   "steps": [
+    "افتح التسميع"
+   ],
+   "expect": {
+    "navigate": "/teacher/recitation"
+   }
+  },
+  {
+   "id": "NAV-T17",
+   "role": "TEACHER",
+   "steps": [
+    "اذهب إلى لوحة التحكم"
+   ],
+   "expect": {
+    "navigate": "/teacher/dashboard"
+   }
+  },
+  {
+   "id": "NAV-T18",
+   "role": "TEACHER",
+   "steps": [
+    "افتح الصفحة الرئيسية"
+   ],
+   "expect": {
+    "navigate": "/teacher/dashboard"
+   }
+  },
+  {
+   "id": "NAV-T19",
+   "role": "TEACHER",
+   "steps": [
+    "افتح الجلسات"
+   ],
+   "expect": {
+    "navigate": "/teacher/sessions"
+   }
+  },
+  {
+   "id": "NAV-T-POINTS",
+   "role": "TEACHER",
+   "steps": [
+    "انقلني الى تبويب النقاط"
+   ],
+   "expect": {
+    "no_ui": true,
+    "answer_contains": "غير متاح"
+   }
+  },
+  {
+   "id": "NAV-M01",
+   "role": "CENTER_MANAGER",
+   "steps": [
+    "انقلني الى تبويب النقاط"
+   ],
+   "expect": {
+    "navigate": "/center-manager/rewards"
+   }
+  },
+  {
+   "id": "NAV-M02",
+   "role": "CENTER_MANAGER",
+   "steps": [
+    "افتح التقارير"
+   ],
+   "expect": {
+    "navigate": "/center-manager/reports"
+   }
+  },
+  {
+   "id": "NAV-M03",
+   "role": "CENTER_MANAGER",
+   "steps": [
+    "افتح المعلمين"
+   ],
+   "expect": {
+    "navigate": "/center-manager/teachers"
+   }
+  },
+  {
+   "id": "NAV-M04",
+   "role": "TENANT_ADMIN",
+   "steps": [
+    "افتح الاعدادات"
+   ],
+   "expect": {
+    "navigate": "/admin/settings"
+   }
+  },
+  {
+   "id": "NAV-M05",
+   "role": "TENANT_ADMIN",
+   "steps": [
+    "خذني الى المستخدمين"
+   ],
+   "expect": {
+    "navigate": "/admin/users"
+   }
+  },
+  {
+   "id": "NAV-M06",
+   "role": "TENANT_ADMIN",
+   "steps": [
+    "افتح تبويب النقاط"
+   ],
+   "expect": {
+    "navigate": "/admin/rewards"
+   }
+  },
+  {
+   "id": "NAV-M07",
+   "role": "TENANT_ADMIN",
+   "steps": [
+    "افتح المراكز"
+   ],
+   "expect": {
+    "navigate": "/admin/centers"
+   }
+  },
+  {
+   "id": "NAV-CM-SETTINGS",
+   "role": "CENTER_MANAGER",
+   "steps": [
+    "افتح الاعدادات"
+   ],
+   "expect": {
+    "no_ui": true,
+    "answer_contains": "غير متاح"
+   }
+  },
+  {
+   "id": "NAV-T-REPORTS",
+   "role": "TEACHER",
+   "steps": [
+    "افتح التقارير"
+   ],
+   "expect": {
+    "no_ui": true,
+    "answer_contains": "غير متاح"
+   }
+  },
+  {
+   "id": "LOGOUT-1",
+   "role": "TEACHER",
+   "steps": [
+    "سجل خروجي"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "LOGOUT-2",
+   "role": "TEACHER",
+   "steps": [
+    "تسجيل الخروج"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "LOGOUT-3",
+   "role": "TEACHER",
+   "steps": [
+    "اخرجني من الحساب"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "LOGOUT-4",
+   "role": "TEACHER",
+   "steps": [
+    "سجلني خروج"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "LOGOUT-5",
+   "role": "TEACHER",
+   "steps": [
+    "logout"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "logout"
+    ]
+   }
+  },
+  {
+   "id": "PWD-1",
+   "role": "TEACHER",
+   "steps": [
+    "ساعدني في تغيير كلمة المرور"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ],
+    "choice_kinds": [
+     "reply",
+     "open_modal"
+    ]
+   }
+  },
+  {
+   "id": "PWD-2",
+   "role": "TEACHER",
+   "steps": [
+    "بدي اغير كلمة السر"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ],
+    "choice_kinds": [
+     "reply",
+     "open_modal"
+    ]
+   }
+  },
+  {
+   "id": "PWD-3",
+   "role": "TEACHER",
+   "steps": [
+    "كيف اغير كلمة المرور"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ],
+    "choice_kinds": [
+     "reply",
+     "open_modal"
+    ]
+   }
+  },
+  {
+   "id": "PWD-4",
+   "role": "TEACHER",
+   "steps": [
+    "نسيت كلمة المرور"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ],
+    "choice_kinds": [
+     "reply",
+     "open_modal"
+    ]
+   }
+  },
+  {
+   "id": "PWD-REVEAL-NOT-ROUTED",
+   "role": "TEACHER",
+   "steps": [
+    "أعطني كلمة المرور"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "NEWSESS-1",
+   "role": "TEACHER",
+   "steps": [
+    "افتح لي جلسة جديدة"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "NEWSESS-2",
+   "role": "TEACHER",
+   "steps": [
+    "ابدأ جلسة تسميع جديدة"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "NEWSESS-3",
+   "role": "TEACHER",
+   "steps": [
+    "بدي ابدا جلسة جديدة"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "NEWSESS-FLOW",
+   "role": "TEACHER",
+   "steps": [
+    "افتح لي جلسة جديدة",
+    "حلقة الفاتحة"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ],
+    "confirm_on_yes": [
+     "navigate"
+    ]
+   }
+  },
+  {
+   "id": "NEWSESS-NAMED",
+   "role": "TEACHER",
+   "steps": [
+    "ابدأ جلسة جديدة في حلقة الفاتحة"
+   ],
+   "expect": {
+    "action_types": [
+     "confirm_ui"
+    ]
+   }
+  },
+  {
+   "id": "PREV-1",
+   "role": "TEACHER",
+   "steps": [
+    "انقلني الى الجلسات السابقة"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "PREV-2",
+   "role": "TEACHER",
+   "steps": [
+    "افتح الجلسات السابقة"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "PREV-3",
+   "role": "TEACHER",
+   "steps": [
+    "اريد سجل الجلسات"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "PREV-FLOW",
+   "role": "TEACHER",
+   "steps": [
+    "انقلني الى الجلسات السابقة",
+    "البقرة"
+   ],
+   "expect": {
+    "navigate": "/teacher/rings/h2/sessions"
+   }
+  },
+  {
+   "id": "PREV-NAMED",
+   "role": "TEACHER",
+   "steps": [
+    "افتح جلسات حلقة الفاتحة"
+   ],
+   "expect": {
+    "navigate": "/teacher/rings/h1/sessions"
+   }
+  },
+  {
+   "id": "PREV-FALSE-POSITIVE",
+   "role": "TEACHER",
+   "steps": [
+    "افتح جلسات حلقة القديمة"
+   ],
+   "expect": {
+    "no_ui": true
+   }
+  },
+  {
+   "id": "STUDENT-FLOW",
+   "role": "TEACHER",
+   "steps": [
+    "افتح لي معلومات الطالب",
+    "خالد يوسف"
+   ],
+   "expect": {
+    "navigate": "/teacher/students/s3/activity"
+   }
+  },
+  {
+   "id": "STUDENT-NAMED",
+   "role": "TEACHER",
+   "steps": [
+    "افتح معلومات الطالب خالد يوسف"
+   ],
+   "expect": {
+    "navigate": "/teacher/students/s3/activity"
+   }
+  },
+  {
+   "id": "STUDENT-AMBIG",
+   "role": "TEACHER",
+   "steps": [
+    "افتح معلومات الطالب أحمد"
+   ],
+   "expect": {
+    "action_types": [
+     "choices"
+    ]
+   }
+  },
+  {
+   "id": "STUDENT-ASK",
+   "role": "TEACHER",
+   "steps": [
+    "افتح بيانات الطالب"
+   ],
+   "expect": {
+    "no_ui": true,
+    "answer_contains": "اسم الطالب"
+   }
+  },
+  {
+   "id": "SLOT-CANCEL",
+   "role": "TEACHER",
+   "steps": [
+    "افتح جلسة جديدة",
+    "لا"
+   ],
+   "expect": {
+    "no_ui": true,
+    "answer_contains": "الإلغاء"
+   }
+  },
+  {
+   "id": "PASS-1",
+   "role": "TEACHER",
+   "steps": [
+    "كم عدد الطلاب في حلقة الفاتحة؟"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-2",
+   "role": "TEACHER",
+   "steps": [
+    "اعرض طلاب حلقة الفاتحة الغائبين اليوم"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-3",
+   "role": "TEACHER",
+   "steps": [
+    "مرحبا كيف حالك"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-4",
+   "role": "TEACHER",
+   "steps": [
+    "ما هي أحكام المد"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-5",
+   "role": "TEACHER",
+   "steps": [
+    "سجل حضور"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-6",
+   "role": "TEACHER",
+   "steps": [
+    "سجل حضور الطالب خالد يوسف"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-7",
+   "role": "TEACHER",
+   "steps": [
+    "اعرض الحلقات"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-8",
+   "role": "TEACHER",
+   "steps": [
+    "من هو الطالب المتميز"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  },
+  {
+   "id": "PASS-9",
+   "role": "TEACHER",
+   "steps": [
+    "هل الطلاب حاضرون اليوم"
+   ],
+   "expect": {
+    "passthrough": true
+   }
+  }
+ ]
+}

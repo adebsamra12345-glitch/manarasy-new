@@ -25,31 +25,33 @@ const MapLocationPicker = ({
 }) => {
     // Default position: Center of Syria [34.8, 38.9]
     const DEFAULT_POS = [34.8, 38.9];
-    
-    const [position, setPosition] = useState(initialPosition ? {lat: initialPosition.lat, lng: initialPosition.lng} : null);
+
+    const [position, setPosition] = useState(initialPosition ? { lat: initialPosition.lat, lng: initialPosition.lng } : null);
     const [mapCenter, setMapCenter] = useState(initialPosition ? [initialPosition.lat, initialPosition.lng] : DEFAULT_POS);
     const [address, setAddress] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [loadingLocation, setLoadingLocation] = useState(false);
-    
+
     const mapRef = useRef();
     const isViewMode = mode === 'view';
 
     const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
+    const API_BASE = import.meta.env.VITE_API_URL || '';
+
     // Reverse Geocoding: Get address from LatLng via Backend
     const fetchAddress = async (lat, lng) => {
         try {
-            const response = await fetch(`http://localhost:8000/api/geodata/reverse/?lat=${lat}&lon=${lng}`);
+            const response = await fetch(`${API_BASE}/api/geodata/reverse/?lat=${lat}&lon=${lng}`);
             const data = await response.json();
-            
+
             if (data && data.display_name) {
                 const a = data.address || {};
                 const city = a.city || a.town || a.village || a.county || '';
                 const neighborhood = a.neighbourhood || a.suburb || '';
                 const country = a.country || '';
-                
+
                 let formattedAddress = data.display_name;
                 const parts = [neighborhood, city, country].filter(Boolean);
                 if (parts.length > 0) {
@@ -76,7 +78,7 @@ const MapLocationPicker = ({
         const handleSearch = async () => {
             if (debouncedSearchQuery.length > 2) {
                 try {
-                    const response = await fetch(`http://localhost:8000/api/geodata/geocode/?query=${encodeURIComponent(debouncedSearchQuery)}`);
+                    const response = await fetch(`${API_BASE}/api/geodata/geocode/?query=${encodeURIComponent(debouncedSearchQuery)}`);
                     const data = await response.json();
                     setSearchResults(data);
                 } catch (error) {
@@ -138,13 +140,13 @@ const MapLocationPicker = ({
 
     return (
         <div style={{ position: 'relative', width: '100%', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            
+
             {/* Search Bar (Only in Picker mode) */}
             {!isViewMode && (
                 <div style={{ position: 'relative', zIndex: 1000 }}>
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                        <input 
-                            type="text" 
+                        <input
+                            type="text"
                             placeholder={placeholder}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
@@ -157,12 +159,12 @@ const MapLocationPicker = ({
                                 outline: 'none',
                             }}
                         />
-                        <MagnifyingGlass 
-                            size={20} 
-                            color="#a0aec0" 
-                            style={{ position: 'absolute', right: '10px' }} 
+                        <MagnifyingGlass
+                            size={20}
+                            color="#a0aec0"
+                            style={{ position: 'absolute', right: '10px' }}
                         />
-                        <button 
+                        <button
                             type="button"
                             onClick={getCurrentLocation}
                             title="موقعي الحالي"
@@ -201,7 +203,7 @@ const MapLocationPicker = ({
                             border: '1px solid #e2e8f0'
                         }}>
                             {searchResults.map((res, i) => (
-                                <div 
+                                <div
                                     key={i}
                                     onClick={() => handleSelectResult(res)}
                                     style={{
@@ -236,14 +238,14 @@ const MapLocationPicker = ({
                     alignItems: 'center',
                     gap: '8px'
                 }}>
-                    <span style={{flex: 1}}>{address}</span>
+                    <span style={{ flex: 1 }}>{address}</span>
                 </div>
             )}
 
             {/* Map */}
             <div style={{ height, width: '100%', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
                 <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>جاري تحميل الخريطة...</div>}>
-                    <LeafletMap 
+                    <LeafletMap
                         center={mapCenter}
                         position={position}
                         onPositionChange={handlePositionChange}

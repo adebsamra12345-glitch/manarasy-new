@@ -7,6 +7,7 @@ import { getStudentsByRing, evaluateRecitation, getEvaluationTemplates, getHalaq
 import { useAuthContext } from '../../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { JUZ_AMMA_SURAHS } from '../../../utils/quranData';
+import { resolveGradeColor } from '../../../utils/gradeColors';
 
 /**
  * MobileRecitationGrade — شاشة رصد درجات التسميع والسبر الشاملة للموبايل
@@ -500,7 +501,7 @@ const MobileRecitationGrade = () => {
                         onClick={() => handleGradeSubmit(g)}
                         disabled={submitting || !selectedStudentId}
                         style={{
-                            backgroundColor: g.color_code || '#558b2f',
+                            backgroundColor: resolveGradeColor(g.color_code),
                             color: '#fff',
                             border: 'none',
                             padding: '1rem',

@@ -13,6 +13,7 @@ class TenantRouter:
         'recitation_and_sabr',
         'reports_and_certificates',
         'points_and_rewards',
+        'ai_assistant',
     ]
 
     # تطبيقات المنصة المركزية الجديدة: لا يجوز أن تُنشأ جداولها داخل قواعد المساجد

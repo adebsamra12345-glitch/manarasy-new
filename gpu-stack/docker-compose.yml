@@ -43,6 +43,8 @@ services:
   stt:
     image: fedirz/faster-whisper-server:latest-cuda
     container_name: manarasy-stt
+    volumes:
+      - "${MODELS_DIR}/.cache:/root/.cache/huggingface"
     runtime: nvidia
     restart: unless-stopped
     depends_on:
@@ -50,7 +52,10 @@ services:
         condition: service_healthy
     environment:
       - WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
-      - WHISPER__COMPUTE_TYPE=int8_float16
+      # CUDA 12.2 في الصورة لا يدعم Blackwell (cuBLAS NOT_SUPPORTED مع int8_float16)؛ float16 يعمل لكنه يترك هامشاً 1.5GB فقط.
+      # لذلك STT على CPU (int8) للحفاظ على ذاكرة الكرت لـ vLLM.
+      - WHISPER__INFERENCE_DEVICE=cpu
+      - WHISPER__COMPUTE_TYPE=int8
       - WHISPER__TTL=-1
     ports:
       - "${TS_IP:?يجب ضبط TS_IP بعنوان Tailscale حصراً}:8001:8000"

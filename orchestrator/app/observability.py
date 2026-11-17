@@ -11,7 +11,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 
-from .resilience import llm_circuit, stt_circuit
+from .resilience import canary_circuit, llm_circuit, stt_circuit, tts_circuit
 
 logger = logging.getLogger("manarasy.orchestrator")
 if not logger.handlers:
@@ -38,6 +38,25 @@ class MetricsRegistry:
         self.latency_sum_ms: dict[str, float] = {}
         self.latency_count: dict[str, int] = {}
         self.cjk_guard_total: dict[tuple[str, str], int] = {}
+        self.variant_total: dict[tuple[str, str], int] = {}
+        self.variant_latency_sum_ms: dict[str, float] = {}
+        self.variant_latency_count: dict[str, int] = {}
+        self.ui_action_total: dict[str, int] = {}
+
+    def inc_variant(self, variant: str, event: str) -> None:
+        """event: request | canary_fallback | error"""
+        with self._lock:
+            self.variant_total[(variant, event)] = self.variant_total.get((variant, event), 0) + 1
+
+    def observe_variant_latency(self, variant: str, latency_ms: float) -> None:
+        with self._lock:
+            self.variant_latency_sum_ms[variant] = self.variant_latency_sum_ms.get(variant, 0.0) + latency_ms
+            self.variant_latency_count[variant] = self.variant_latency_count.get(variant, 0) + 1
+
+    def inc_ui_action(self, via: str) -> None:
+        """via: router | llm"""
+        with self._lock:
+            self.ui_action_total[via] = self.ui_action_total.get(via, 0) + 1
 
     def inc_cjk_guard(self, action: str, endpoint: str) -> None:
         with self._lock:
@@ -53,6 +72,10 @@ class MetricsRegistry:
             self.latency_sum_ms.clear()
             self.latency_count.clear()
             self.cjk_guard_total.clear()
+            self.variant_total.clear()
+            self.variant_latency_sum_ms.clear()
+            self.variant_latency_count.clear()
+            self.ui_action_total.clear()
 
     def observe(
         self,
@@ -119,10 +142,38 @@ class MetricsRegistry:
                 lines.append(f'cjk_guard_total{{action="{action}",endpoint="{endpoint}"}} {count}')
 
         lines.extend([
+            "# HELP agent_variant_total Agent requests per rollout variant and event",
+            "# TYPE agent_variant_total counter",
+        ])
+        with self._lock:
+            for (variant, event), count in sorted(self.variant_total.items()):
+                lines.append(f'agent_variant_total{{variant="{variant}",event="{event}"}} {count}')
+            lines.extend([
+                "# HELP agent_variant_latency_ms_sum Agent latency per variant",
+                "# TYPE agent_variant_latency_ms_sum counter",
+            ])
+            for v, total in sorted(self.variant_latency_sum_ms.items()):
+                lines.append(f'agent_variant_latency_ms_sum{{variant="{v}"}} {total:.2f}')
+            lines.extend([
+                "# HELP agent_variant_latency_ms_count Agent latency observations per variant",
+                "# TYPE agent_variant_latency_ms_count counter",
+            ])
+            for v, cnt in sorted(self.variant_latency_count.items()):
+                lines.append(f'agent_variant_latency_ms_count{{variant="{v}"}} {cnt}')
+            lines.extend([
+                "# HELP agent_ui_action_total UI actions produced, by source (router=deterministic, llm=open_screen tool)",
+                "# TYPE agent_ui_action_total counter",
+            ])
+            for via, cnt in sorted(self.ui_action_total.items()):
+                lines.append(f'agent_ui_action_total{{via="{via}"}} {cnt}')
+
+        lines.extend([
             "# HELP orchestrator_circuit_breaker_state Circuit breaker state (0=CLOSED, 1=HALF_OPEN, 2=OPEN)",
             "# TYPE orchestrator_circuit_breaker_state gauge",
             f'orchestrator_circuit_breaker_state{{service="vllm"}} {llm_circuit.state_numeric}',
             f'orchestrator_circuit_breaker_state{{service="stt"}} {stt_circuit.state_numeric}',
+            f'orchestrator_circuit_breaker_state{{service="vllm_canary"}} {canary_circuit.state_numeric}',
+            f'orchestrator_circuit_breaker_state{{service="tts"}} {tts_circuit.state_numeric}',
         ])
         return "\n".join(lines) + "\n"
 
@@ -144,6 +195,7 @@ def log_structured_event(
     completion_tokens: int = 0,
     injection_flagged: bool = False,
     outcome: str = "ok",
+    variant: str = "",
 ) -> None:
     """
     يسجّل سطراً بصيغة JSON منظمة.
@@ -176,5 +228,7 @@ def log_structured_event(
         "injection_flagged": injection_flagged,
         "circuit_vllm": llm_circuit.state,
     }
+    if variant:
+        record["variant"] = variant
     logger.info(json.dumps(record, ensure_ascii=False))
 

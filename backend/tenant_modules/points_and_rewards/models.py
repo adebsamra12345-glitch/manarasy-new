@@ -16,6 +16,7 @@ class PointTransaction(models.Model):
         ('RECITATION', 'تسميع وإنجاز'),
         ('MANUAL_ADJUSTMENT', 'تعديل يدوي'),
         ('REFUND', 'استرجاع نقاط'),
+        ('HISTORICAL_RECONCILIATION', 'تسوية رصيد تاريخي / قيد افتتاحي'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -26,11 +27,21 @@ class PointTransaction(models.Model):
     balance_before = models.IntegerField(default=0)
     balance_after = models.IntegerField(default=0)
     performed_by = models.ForeignKey(UserProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='awarded_point_transactions')
+    idempotency_key = models.CharField(max_length=120, null=True, blank=True, db_index=True, help_text="مفتاح التفرد لمنع تكرار الحركة")
+    reference_id = models.CharField(max_length=100, null=True, blank=True, db_index=True, help_text="معرف الكيان المرجعي (مسابقة، مكافأة، تسميع...)")
+    reference_type = models.CharField(max_length=50, null=True, blank=True, help_text="نوع الكيان المرجعي")
+    metadata = models.JSONField(default=dict, blank=True, help_text="بيانات تدقيق إضافية")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'point_transactions'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['student', '-created_at'], name='pt_stu_created_idx'),
+            models.Index(fields=['transaction_type'], name='pt_tx_type_idx'),
+            models.Index(fields=['idempotency_key'], name='pt_idemp_key_idx'),
+            models.Index(fields=['reference_id', 'reference_type'], name='pt_ref_idx'),
+        ]
 
     def __str__(self):
         return f"{self.student.full_name} ({self.amount:+d}) - {self.get_transaction_type_display()}"

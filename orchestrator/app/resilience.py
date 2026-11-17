@@ -75,6 +75,8 @@ class CircuitBreaker:
 
 llm_circuit = CircuitBreaker("vllm")
 stt_circuit = CircuitBreaker("stt")
+tts_circuit = CircuitBreaker("tts")
+canary_circuit = CircuitBreaker("vllm_canary")  # منفصل: فشل المحوّل التجريبي لا يفتح قاطع المستقر
 
 
 async def retry_with_backoff(

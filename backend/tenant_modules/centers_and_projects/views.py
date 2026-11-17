@@ -332,6 +332,9 @@ def center_list_create_view(request):
         return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
     if request.method == 'GET':
+        payload = get_token_payload(request)
+        if not payload:
+            return JsonResponse({"status": "error", "message": "التوثيق مطلوب للوصول إلى قائمة المراكز"}, status=401)
         try:
             centers_qs = Center.objects.using(db_name).all().order_by('-created_at')
             payload = get_token_payload(request)
@@ -799,6 +802,9 @@ def project_list_create_view(request):
         return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
     if request.method == 'GET':
+        payload = get_token_payload(request)
+        if not payload:
+            return JsonResponse({"status": "error", "message": "التوثيق مطلوب للوصول إلى قائمة المشاريع"}, status=401)
         try:
             projects = Project.objects.using(db_name).prefetch_related('centers', 'stages__parts', 'stages__exam_template', 'evaluation_template__grades').all().order_by('-created_at')
             payload = get_token_payload(request)

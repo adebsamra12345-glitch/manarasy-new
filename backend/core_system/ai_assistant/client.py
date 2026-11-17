@@ -204,6 +204,55 @@ class OrchestratorClient:
             data['speak'] = sanitize_output_for_ui(data['speak'])
         return {'feature_enabled': True, **data}
 
+    def agent_chat(
+        self,
+        *,
+        message: str,
+        session_id: str = '',
+        halaqat_ids: list[str] | None = None,
+        user_id: str,
+        role: str,
+        tenant_id: str,
+        user_jwt: str = '',
+    ) -> dict[str, Any]:
+        if not self.is_feature_enabled('VOICE_TEXT_AGENT'):
+            return {
+                'ai_available': False,
+                'feature_enabled': False,
+                'status': 'degraded',
+                'answer': FALLBACK_MESSAGES['agent'],
+                'tool_calls_made': [],
+                'confirm_required': None,
+                'session_id': session_id,
+            }
+        payload = {
+            'message': message,
+            'session_id': session_id,
+            'halaqat_ids': [str(x) for x in (halaqat_ids or [])],
+        }
+        ok, data = self._post(
+            '/v1/agent/chat',
+            payload,
+            user_id=user_id,
+            role=role,
+            tenant_id=tenant_id,
+            user_jwt=user_jwt,
+            halaqat_ids=halaqat_ids,
+        )
+        if not ok:
+            return {
+                'ai_available': False,
+                'feature_enabled': True,
+                'status': 'degraded',
+                'answer': sanitize_output_for_ui(data.get('detail') or data.get('answer') or FALLBACK_MESSAGES['agent']),
+                'tool_calls_made': [],
+                'confirm_required': None,
+                'session_id': session_id,
+            }
+        if 'answer' in data:
+            data['answer'] = sanitize_output_for_ui(data['answer'])
+        return {'ai_available': True, 'feature_enabled': True, **data}
+
     def confirm_agent_action(
         self,
         *,
@@ -365,6 +414,22 @@ class OrchestratorClient:
             'feature_enabled': True,
             'content': sanitize_output_for_ui(data.get('content', '')),
         }
+
+    def speak(self, *, text: str, user_id: str, role: str, tenant_id: str) -> tuple[bytes | None, str]:
+        """يرجع (صوت mp3 أو None، نوع المحتوى). None = غير متاح فيقرأ المتصفح الرد."""
+        if not self.is_feature_enabled('TTS_SPEECH') or not self.base_url or not self.service_key:
+            return None, ''
+        req = urllib.request.Request(
+            url=f'{self.base_url}/v1/audio/speak',
+            data=json.dumps({'text': text[:1000]}).encode('utf-8'),
+            headers=self._headers(user_id=user_id, role=role, tenant_id=tenant_id),
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=max(self.timeout, 20.0)) as resp:
+                return resp.read(), resp.headers.get('Content-Type', 'audio/mpeg')
+        except Exception:
+            return None, ''
 
     def transcribe_audio(
         self,

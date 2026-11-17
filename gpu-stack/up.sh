@@ -29,6 +29,23 @@ if [ -z "$TS_IP" ] || [ "$TS_IP" = "0.0.0.0" ]; then
 fi
 export TS_IP
 
+# الاستخدام: ./up.sh            تشغيل أول (يفحص الذاكرة الحرة)
+#            ./up.sh restart    إعادة تشغيل/تحديث المحوّلات: يوقف llm ثم يتخطى فحص الذاكرة المسبق
+#            (تلقائياً أيضاً: إن كانت حاوية manarasy-vllm تعمل أصلاً يُتخطّى الفحص ويُعاد إنشاؤها بالإعدادات الجديدة)
+MODE="${1:-up}"
+case "$MODE" in up|restart) ;; *) echo "الاستخدام: $0 [restart]"; exit 1 ;; esac
+
+VLLM_RUNNING=0
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'manarasy-vllm'; then
+  VLLM_RUNNING=1
+fi
+if [ "$MODE" = "restart" ] && [ "$VLLM_RUNNING" = "1" ]; then
+  echo "♻️ restart: إيقاف حاوية vLLM لتحرير الذاكرة ثم إعادة التشغيل..."
+  docker compose stop llm
+  sleep 5
+  VLLM_RUNNING=0
+fi
+
 NEED_MB="${NEED_MB:-13000}"       # vLLM FP8 @ 0.80 (~12GB) + هامش إقلاع
 MIN_MARGIN_MB="${MIN_MARGIN_MB:-2500}"
 
@@ -38,7 +55,9 @@ total=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head
 
 echo "📊 حالة الـ GPU قبل التشغيل: مستخدم=${used}MB | حر=${free}MB | إجمالي=${total}MB"
 
-if [ "$free" -lt "$NEED_MB" ]; then
+if [ "$VLLM_RUNNING" = "1" ]; then
+  echo "ℹ️ حاوية manarasy-vllm تعمل أصلاً: تخطّي فحص الذاكرة المسبق (الذاكرة محجوزة لها)."
+elif [ "$free" -lt "$NEED_MB" ]; then
   echo "❌ الذاكرة الحرة (${free}MB) أقل من الحد المطلوب (${NEED_MB}MB)."
   echo "التطبيقات التي تستخدم الـ GPU حالياً:"
   nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv
@@ -50,7 +69,7 @@ mkdir -p ./loras ./data
 # محوّلات LoRA المتعددة على نفس النموذج الأساسي (manarasy + منصة المعاهد + منصة مساعدة الطلاب ...).
 # LORA_MODULES: أزواج "اسم=مجلد" مفصولة بمسافات؛ المجلد نسبي إلى ./loras ويُخدَّم المحوّل بالاسم المعطى.
 # يُحمَّل فقط ما يوجد له adapter_config.json، والباقي يُتخطّى مع تنبيه.
-LORA_MODULES="${LORA_MODULES:-manarasy=manarasy-qwen3-v1}"
+LORA_MODULES="${LORA_MODULES:-manarasy=manarasy-qwen3-v2 manarasy_v1=manarasy-qwen3-v1}"
 lora_specs=""
 for spec in $LORA_MODULES; do
   lora_name="${spec%%=*}"

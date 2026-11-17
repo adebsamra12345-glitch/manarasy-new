@@ -25,6 +25,8 @@ def parse_body(request):
 @tenant_auth()
 def student_list_create_view(request):
     db_name = get_tenant_db(request)
+    profile = getattr(request, 'profile', None)
+    roles = profile.get_roles() if profile else []
 
     if request.method == 'GET':
         halaqa_id = request.GET.get('halaqa_id')
@@ -70,6 +72,37 @@ def student_list_create_view(request):
                             queryset = queryset.none()
                 except Exception:
                     pass
+            # تقييد الوصول حسب الدور لضمان عزل البيانات وحماية الخصوصية
+            if 'TENANT_ADMIN' in roles:
+                pass
+            elif 'CENTER_MANAGER' in roles:
+                if profile and profile.center:
+                    queryset = queryset.filter(
+                        Q(halaqa__center=profile.center) |
+                        Q(enrollments__halaqa__center=profile.center) |
+                        Q(halaqa__isnull=True)
+                    ).distinct()
+                else:
+                    queryset = queryset.none()
+            elif 'TEACHER' in roles:
+                t_name = f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username if profile and profile.user else ''
+                teacher_halaqat_ids = Halaqa.objects.using(db_name).filter(teacher_name=t_name, is_active=True).values_list('id', flat=True)
+                queryset = queryset.filter(halaqa_id__in=teacher_halaqat_ids)
+            elif 'STUDENT' in roles:
+                # الطالب يرى حسابه وسجله فقط
+                if profile and profile.user_id:
+                    queryset = queryset.filter(user_id=profile.user_id)
+                else:
+                    queryset = queryset.none()
+            elif 'PARENT' in roles:
+                # ولي الأمر يرى أبناءه فقط
+                parent_phone = (profile.phone or (profile.user.username if profile.user else '')).strip()
+                if parent_phone:
+                    queryset = queryset.filter(Q(father_phone=parent_phone) | Q(mother_phone=parent_phone))
+                else:
+                    queryset = queryset.none()
+            else:
+                queryset = queryset.none()
 
             if halaqa_id and halaqa_id != 'all':
                 queryset = queryset.filter(halaqa_id=halaqa_id)
@@ -156,6 +189,8 @@ def student_list_create_view(request):
             return JsonResponse({"status": "error", "message": "حدث خطأ عند استرجاع ملفات الطلاب"}, status=500)
 
     elif request.method == 'POST':
+        if not (set(roles) & {'TENANT_ADMIN', 'CENTER_MANAGER', 'TEACHER'}):
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدارة أو المعلم مطلوبة لإضافة طالب جديد"}, status=403)
         try:
             data = parse_body(request)
             
@@ -261,6 +296,9 @@ def student_list_create_view(request):
 @tenant_auth()
 def student_detail_view(request, pk):
     db_name = get_tenant_db(request)
+    profile = getattr(request, 'profile', None)
+    roles = profile.get_roles() if profile else []
+
     try:
         student = Student.objects.using(db_name).select_related('user', 'halaqa__center').get(id=pk)
     except Student.DoesNotExist:
@@ -287,6 +325,33 @@ def student_detail_view(request, pk):
                         return JsonResponse({"status": "error", "message": "غير مصرح لك بالوصول لبيانات هذا الطالب"}, status=403)
         except Exception:
             pass
+    # التحقق الصارم من صلاحية الوصول لبيانات الطالب
+    if 'TENANT_ADMIN' in roles:
+        pass
+    elif 'CENTER_MANAGER' in roles:
+        if profile and profile.center:
+            student_center = student.halaqa.center if student.halaqa else None
+            if student_center != profile.center and not student.enrollments.filter(halaqa__center=profile.center).exists():
+                return JsonResponse({"status": "error", "message": "غير مصرح لمدير المركز بالوصول لبيانات هذا الطالب"}, status=403)
+        else:
+            return JsonResponse({"status": "error", "message": "غير مصرح لك بالوصول لبيانات هذا الطالب"}, status=403)
+    elif 'TEACHER' in roles:
+        t_name = f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.username if profile and profile.user else ''
+        teacher_halaqat_ids = set(Halaqa.objects.using(db_name).filter(teacher_name=t_name, is_active=True).values_list('id', flat=True))
+        student_halaqas = set(student.enrollments.filter(is_active=True).values_list('halaqa_id', flat=True))
+        if student.halaqa_id:
+            student_halaqas.add(student.halaqa_id)
+        if not (teacher_halaqat_ids & student_halaqas):
+            return JsonResponse({"status": "error", "message": "غير مصرح للمعلم بالوصول لبيانات طالب خارج حلقاته"}, status=403)
+    elif 'STUDENT' in roles:
+        if not profile or not student.user_id or str(student.user_id) != str(profile.user_id):
+            return JsonResponse({"status": "error", "message": "غير مصرح للطالب بالاطلاع على بيانات طلاب آخرين"}, status=403)
+    elif 'PARENT' in roles:
+        parent_phone = (profile.phone or (profile.user.username if profile.user else '')).strip()
+        if not parent_phone or (student.father_phone != parent_phone and student.mother_phone != parent_phone):
+            return JsonResponse({"status": "error", "message": "غير مصرح لولي الأمر بالاطلاع على بيانات طلاب غير أبنائه"}, status=403)
+    else:
+        return JsonResponse({"status": "error", "message": "غير مصرح لك بالوصول لبيانات هذا الطالب"}, status=403)
 
     if request.method == 'GET':
         enrollments_data = []
@@ -337,6 +402,8 @@ def student_detail_view(request, pk):
         return JsonResponse({"status": "success", "data": data}, status=200)
 
     elif request.method in ['PUT', 'PATCH']:
+        if not (set(roles) & {'TENANT_ADMIN', 'CENTER_MANAGER', 'TEACHER'}):
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات الإدارة أو المعلم مطلوبة لتعديل بيانات الطالب"}, status=403)
         try:
             data = parse_body(request)
 
@@ -366,8 +433,8 @@ def student_detail_view(request, pk):
                 student.income_level = data['income_level']
             if 'general_notes' in data:
                 student.general_notes = data['general_notes']
-            if 'points' in data:
-                student.points = int(data['points'] or 0)
+            # Security Hardening (Ledger-First): student.points cannot be modified directly via profile update.
+            # Points are immutable and managed exclusively via PointsService and PointTransactions.
             if 'reached_page' in data and data['reached_page'] is not None:
                 student.reached_page = int(data['reached_page'])
 
@@ -420,6 +487,8 @@ def student_detail_view(request, pk):
             return JsonResponse({"status": "error", "message": "حدث خطأ أثناء تعديل بيانات الطالب"}, status=500)
 
     elif request.method == 'DELETE':
+        if not (set(roles) & {'TENANT_ADMIN', 'CENTER_MANAGER'}):
+            return JsonResponse({"status": "error", "message": "عذراً، صلاحيات مدير النظام أو مدير المركز مطلوبة لحذف الطالب"}, status=403)
         try:
             student_name = student.full_name
             user_to_delete = student.user

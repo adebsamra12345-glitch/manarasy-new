@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent_backend import Principal
@@ -25,8 +25,10 @@ from .arabic import fix_arabic_counts
 from .observability import log_structured_event, metrics
 from .prompts_loader import registry
 from .rate_limit import rate_limiter
-from .screens import reset_slots, route_message
-from .resilience import CircuitBreakerOpenError, llm_circuit, stt_circuit
+from .rollout import Variant, agent_variant, describe as describe_rollout, stable_variant
+from .screens import route_message, set_context
+from .state_store import store
+from .resilience import CircuitBreakerOpenError, canary_circuit, llm_circuit, stt_circuit
 from .security import (
     ServiceCaller,
     sanitize_model_output,
@@ -37,6 +39,7 @@ from .security import (
     wrap_tool_result_ex,
 )
 from .stt_client import check_stt_ready, transcribe_audio
+from .tts_client import TtsDisabled, synthesize, tts_enabled
 
 app = FastAPI(title="Manarasy AI Orchestrator", version="1.0.0")
 
@@ -102,6 +105,10 @@ class AgentChatRequest(BaseModel):
     halaqat_ids: list[str] = Field(default_factory=list)
 
 
+class SpeakRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000)
+
+
 class ConfirmRequest(BaseModel):
     token: str = Field(..., min_length=1)
     utterance: str = Field(..., min_length=1, max_length=500)
@@ -116,8 +123,11 @@ def health():
         "circuit_breakers": {
             "vllm": llm_circuit.state,
             "stt": stt_circuit.state,
+            "vllm_canary": canary_circuit.state,
         },
         "prompts": registry.list_versions(),
+        "agent_rollout": describe_rollout(),
+        "tts_enabled": tts_enabled(),
     }
 
 
@@ -581,40 +591,49 @@ def v1_confirm_tool(
 SESSION_MAX_TURNS = 8
 SESSION_TTL_SECONDS = 1800  # 30 دقيقة
 
-_chat_sessions: dict[str, dict[str, Any]] = {}
-
-
 def _get_chat_history(session_key: str) -> list[dict[str, Any]]:
-    now = time.time()
-    expired = [k for k, v in _chat_sessions.items() if now - v.get("updated_at", 0) > SESSION_TTL_SECONDS]
-    for k in expired:
-        _chat_sessions.pop(k, None)
-
-    entry = _chat_sessions.get(session_key)
-    if not entry:
-        return []
-    if now - entry.get("updated_at", 0) > SESSION_TTL_SECONDS:
-        _chat_sessions.pop(session_key, None)
-        return []
-    return list(entry.get("messages", []))
+    entry = store.get(f"chat:{session_key}")
+    return list((entry or {}).get("messages", []))
 
 
 def _save_chat_turn(session_key: str, user_msg: str, assistant_msg: str) -> None:
-    now = time.time()
-    entry = _chat_sessions.setdefault(session_key, {"messages": [], "updated_at": now})
-    entry["updated_at"] = now
-    msgs = entry.setdefault("messages", [])
+    msgs = _get_chat_history(session_key)
     msgs.append({"role": "user", "content": user_msg})
     msgs.append({"role": "assistant", "content": assistant_msg})
-    max_msgs = SESSION_MAX_TURNS * 2
-    if len(msgs) > max_msgs:
-        entry["messages"] = msgs[-max_msgs:]
+    store.set(f"chat:{session_key}", {"messages": msgs[-SESSION_MAX_TURNS * 2:]}, SESSION_TTL_SECONDS)
 
 
 def reset_chat_sessions() -> None:
-    global _chat_sessions
-    _chat_sessions.clear()
-    reset_slots()
+    store.clear()
+
+
+async def _agent_completion(messages, tpl, caller, endpoint: str, variant: Variant):
+    """نداء النموذج للوكيل حسب المجموعة (stable/canary). فشل canary يسقط فوراً إلى المستقر في الطلب نفسه."""
+    async def _call(v: Variant):
+        return await chat_completion(
+            messages,
+            max_tokens=tpl.max_tokens,
+            temperature=tpl.temperature,
+            enable_thinking=False,
+            tools=specs_for(caller.role, ui_tool=v.ui_tool),
+            model=v.model,
+            endpoint=endpoint,
+            circuit=canary_circuit if v.canary else None,
+        )
+
+    try:
+        return await _call(variant), variant
+    except Exception:
+        if not variant.canary:
+            metrics.inc_variant(variant.name, "error")
+            raise
+        metrics.inc_variant("canary", "canary_fallback")
+        fallback = stable_variant()
+        try:
+            return await _call(fallback), fallback
+        except Exception:
+            metrics.inc_variant(fallback.name, "error")
+            raise
 
 
 @app.post("/v1/agent/chat")
@@ -636,7 +655,8 @@ async def v1_agent_chat(
     session_id = req.session_id.strip() or secrets.token_hex(8)
     session_key = f"{caller.tenant_id}:{caller.user_id}:{session_id}"
 
-    allowed_tools = specs_for(caller.role)
+    variant = agent_variant(caller.tenant_id, caller.user_id)
+    metrics.inc_variant(variant.name, "request")
     try:
         tpl = registry.get("agent_chat")
     except KeyError:
@@ -659,6 +679,7 @@ async def v1_agent_chat(
             injection_flagged=flagged,
             outcome="routed_ui_action",
         )
+        metrics.inc_ui_action("router")
         return {
             "answer": routed["answer"],
             "ui_actions": routed["ui_actions"],
@@ -678,21 +699,14 @@ async def v1_agent_chat(
     tool_calls_made: list[str] = []
     confirm_required: dict[str, Any] | None = None
     final_answer: str = ""
+    ui_actions: list[dict[str, Any]] = []
 
     max_rounds = 4
     res: dict[str, Any] = {}
     content: str = ""
     for round_idx in range(max_rounds):
         try:
-            res = await chat_completion(
-                current_messages,
-                max_tokens=tpl.max_tokens,
-                temperature=tpl.temperature,
-                enable_thinking=False,
-                tools=allowed_tools,
-                model=get_settings().vllm_model_agent,
-                endpoint="/v1/agent/chat",
-            )
+            res, variant = await _agent_completion(current_messages, tpl, caller, "/v1/agent/chat", variant)
         except Exception:
             log_structured_event(
                 endpoint="/v1/agent/chat",
@@ -740,14 +754,14 @@ async def v1_agent_chat(
             break
 
         tool_def = TOOLS.get(tool_name)
-        if not tool_def:
+        if not tool_def or (tool_name == "open_screen" and not variant.ui_tool):
             tool_err = {"status": "error", "message": f"الأداة {tool_name} غير مدعومة"}
             current_messages.append({"role": "assistant", "content": content or "", "tool_calls": [first_call]})
             current_messages.append({"role": "tool", "tool_call_id": call_id, "content": wrap_tool_result(tool_err)})
             continue
 
         if tool_def.write:
-            tool_res = execute_tool_call(p, tool_name, parsed_args)
+            tool_res = execute_tool_call(p, tool_name, parsed_args, ui_tool=variant.ui_tool)
             if tool_res.get("status") == "confirm_required":
                 confirm_required = {
                     "confirm_token": tool_res["confirm_token"],
@@ -762,9 +776,16 @@ async def v1_agent_chat(
                 final_answer = tool_res.get("speak", "هل ترغب في تأكيد هذا الإجراء؟")
             break
 
-        tool_res = execute_tool_call(p, tool_name, parsed_args)
+        set_context(caller.role, session_key)
+        tool_res = execute_tool_call(p, tool_name, parsed_args, ui_tool=variant.ui_tool)
         if tool_res.get("status") == "needs_clarification":
             final_answer = tool_res.get("speak", "هل تعيد التوضيح من فضلك؟")
+            break
+        if tool_name == "open_screen" and tool_res.get("status") == "ok":
+            ui_out = tool_res["result"]
+            final_answer = ui_out.get("answer", "")
+            ui_actions = ui_out.get("ui_actions", [])
+            metrics.inc_ui_action("llm")
             break
 
         payload = tool_res.get("result") if tool_res.get("status") == "ok" else tool_res
@@ -801,10 +822,13 @@ async def v1_agent_chat(
         completion_tokens=res.get("completion_tokens", 0),
         injection_flagged=flagged,
         outcome="confirm_required" if confirm_required else "answered",
+        variant=variant.name,
     )
+    metrics.observe_variant_latency(variant.name, (time.monotonic() - t0) * 1000)
 
     return {
         "answer": final_answer,
+        "ui_actions": ui_actions,
         "tool_calls_made": tool_calls_made,
         "confirm_required": confirm_required,
         "session_id": session_id,
@@ -820,7 +844,8 @@ async def v1_agent_turn(
     """يستقبل أمراً نصياً من المعلم أو المدير، يختار الأداة عبر Qwen3-8B، وينفّذها مع التأكيد الصوتي."""
     t0 = time.monotonic()
     rate_limiter.check(caller)
-    allowed_tools = specs_for(caller.role)
+    variant = agent_variant(caller.tenant_id, caller.user_id)
+    metrics.inc_variant(variant.name, "request")
     tpl = registry.get("agent_tools")
     clean_utt, flagged = sanitize_user_input(req.utterance, max_chars=1500)
 
@@ -837,20 +862,13 @@ async def v1_agent_turn(
             injection_flagged=flagged,
             outcome="routed_ui_action",
         )
+        metrics.inc_ui_action("router")
         return {"ai_available": True, "status": "ok", "speak": routed["answer"], "ui_actions": routed["ui_actions"]}
 
     messages = tpl.render_messages(utterance=clean_utt)
 
     try:
-        res = await chat_completion(
-            messages,
-            max_tokens=tpl.max_tokens,
-            temperature=tpl.temperature,
-            enable_thinking=False,
-            tools=allowed_tools,
-            model=get_settings().vllm_model_agent,
-            endpoint="/v1/agent/turn",
-        )
+        res, variant = await _agent_completion(messages, tpl, caller, "/v1/agent/turn", variant)
     except Exception:
         log_structured_event(
             endpoint="/v1/agent/turn",
@@ -889,7 +907,12 @@ async def v1_agent_turn(
     else:
         parsed_args = raw_args
 
-    tool_result = execute_tool_call(p, tool_name, parsed_args)
+    set_context(caller.role, f"{caller.tenant_id}:{caller.user_id}:turn")
+    tool_result = execute_tool_call(p, tool_name, parsed_args, ui_tool=variant.ui_tool)
+    if tool_name == "open_screen" and tool_result.get("status") == "ok":
+        ui_out = tool_result["result"]
+        tool_result = {"status": "ok", "speak": ui_out.get("answer", ""), "ui_actions": ui_out.get("ui_actions", [])}
+        metrics.inc_ui_action("llm")
 
     log_structured_event(
         endpoint="/v1/agent/turn",
@@ -904,7 +927,9 @@ async def v1_agent_turn(
         completion_tokens=res["completion_tokens"],
         injection_flagged=flagged,
         outcome=tool_result.get("status", "ok"),
+        variant=variant.name,
     )
+    metrics.observe_variant_latency(variant.name, (time.monotonic() - t0) * 1000)
     return {"ai_available": True, "tool": tool_name, **tool_result}
 
 
@@ -986,3 +1011,26 @@ async def v1_audio_transcribe(
             "text": "",
             "speak": "خدمة التعرف على الصوت غير متاحة حالياً، يمكنك الكتابة نصياً.",
         }
+
+
+# ─── 5. Text-To-Speech (اختياري) ─────────────────────────────────────────────
+@app.post("/v1/audio/speak")
+async def v1_audio_speak(req: SpeakRequest, caller: ServiceCaller = Depends(verify_service_key)):
+    """يحوّل رد المساعد إلى صوت (mp3) عبر خدمة TTS إن كانت مفعّلة؛ وإلا 503 فيقرأ المتصفح الرد."""
+    t0 = time.monotonic()
+    rate_limiter.check(caller)
+    try:
+        audio, ctype = await synthesize(req.text)
+    except TtsDisabled:
+        return JSONResponse({"ai_available": False, "detail": "tts_disabled"}, status_code=503)
+    except Exception:
+        log_structured_event(
+            endpoint="/v1/audio/speak", status_code=503, latency_ms=(time.monotonic() - t0) * 1000, role=caller.role,
+            user_id=caller.user_id, tenant_id=caller.tenant_id, outcome="fallback_unavailable",
+        )
+        return JSONResponse({"ai_available": False, "detail": "tts_unavailable"}, status_code=503)
+    log_structured_event(
+        endpoint="/v1/audio/speak", status_code=200, latency_ms=(time.monotonic() - t0) * 1000, role=caller.role,
+        user_id=caller.user_id, tenant_id=caller.tenant_id, outcome="ok",
+    )
+    return Response(content=audio, media_type=ctype)

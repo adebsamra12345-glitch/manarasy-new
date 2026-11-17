@@ -107,6 +107,24 @@ flowchart LR
   # وضع القياس الحي على Qwen3-8B الفعلي بعد تشغيل عقدة الـ GPU:
   EVAL_LIVE_VLLM=1 VLLM_BASE_URL=http://100.119.62.40:8000/v1 /root/manarasy/agent_gateway/.venv/bin/python /root/manarasy/orchestrator/eval/evaluate_golden.py
   ```
+- **بوابة قبول المحوّل (تُشغَّل على الشبكة الخاصة مع الـ GPU قبل اعتماد أي محوّل):**
+  ```bash
+  PY=/root/manarasy/agent_gateway/.venv/bin/python
+  export VLLM_CHAT_URL=http://100.119.62.40:8000/v1/chat/completions EVAL_MODELS=base,manarasy
+  cd /root/manarasy/orchestrator/eval
+  $PY independent_eval_ar.py      # 46 حالة بلهجات متعددة (يستبعد المتسرّب من التدريب) -> gpu-stack/data/independent_eval_<model>.json
+  $PY generate_general_data.py    # (مرة واحدة) يولّد أسئلة الكتابة الحرة الخارجة عن التدريب
+  $PY free_text_eval_ar.py        # CJK ونسبة العربية والطول -> gpu-stack/data/free_text_eval.json
+  $PY ab_endpoints.py             # A/B لنقطتي evaluation-note وreport-insight قبل تثبيت التوجيه
+  cd /root/manarasy/gpu-stack/training
+  $PY compare_eval.py --before ../data/eval_report_reference_mock.json --after <تقرير ذهبي للمحوّل> \
+      --independent-before ../data/independent_eval_base.json --independent-after ../data/independent_eval_manarasy.json \
+      --free-text ../data/free_text_eval.json --free-text-model manarasy --free-text-base base --cjk-margin 0.05
+  ```
+  الشرطان الإضافيان: (1) عدم تراجع الأدوات/الأمان على المجموعة المستقلة، (2) نسبة إجابات CJK في الكتابة الحرة ≤ نسبة النموذج الأساسي + الهامش.
+  لبناء بيانات تدريب مختلطة: `gpu-stack/training/build_mixed_dataset.py` بعد `generate_general_data.py`.
+- **توجيه النماذج:** `/v1/agent/turn` => `VLLM_MODEL_AGENT` (manarasy)؛ بقية النقاط => `VLLM_MODEL_TEXT` (base)؛ `VLLM_MODEL_FALLBACK` لإعادة المحاولة عند ظهور حروف CJK
+  (المقياس `cjk_guard_total{action,endpoint}`). للنقطتين `VLLM_MODEL_EVALUATION_NOTE` و`VLLM_MODEL_REPORT_INSIGHT` تجاوز اختياري بعد A/B.
 - **اختبار الحمل والتزامن (Load Test):**
   ```bash
   /root/manarasy/agent_gateway/.venv/bin/python /root/manarasy/orchestrator/tests/load_test.py
@@ -117,6 +135,7 @@ flowchart LR
 ## 5. استكشاف الأعطال (Troubleshooting)
 
 1. **`up.sh` يتوقف برسالة `الذاكرة الحرة أقل من الحد المطلوب (13000MB)`:**
+   - للتحديث أو إعادة التشغيل والـ vLLM يعمل أصلاً: `cd gpu-stack && ./up.sh restart` (يتخطى فحص الذاكرة المسبق).
    - نفّذ `nvidia-smi` على جهاز الـ GPU لمراجعة العمليات المستهلكة للـ VRAM. إذا كانت حاوية قديمة لـ `Qwen2.5-7B` لا تزال شغالة، أوقفها بـ `docker compose down` ثم أعد تشغيل `up.sh`.
 2. **`/ready` في الـ Orchestrator يُرجع `503` أو `vllm_circuit: "OPEN"`:**
    - تحقق من اتصال Tailscale بين الـ VPS وعقدة الـ GPU: `tailscale ping 100.119.62.40`.

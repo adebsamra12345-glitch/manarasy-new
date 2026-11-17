@@ -43,3 +43,26 @@ test('logout never runs directly from confirm_ui without user click', () => {
     assert.equal(calls[0][0], 'showConfirm');
     assert.deepEqual(calls[0][1].onConfirm, [{ type: 'logout' }]);
 });
+
+import { parseYesNo } from './uiActions.js';
+import { splitChunks, prepareSpeechText } from './tts.js';
+
+test('parseYesNo: short replies only, negation wins', () => {
+    assert.equal(parseYesNo('نعم'), 'yes');
+    assert.equal(parseYesNo('أيوه أكّد'), 'yes');
+    assert.equal(parseYesNo('لا تؤكد'), 'no');
+    assert.equal(parseYesNo('نعم لا'), 'no');
+    assert.equal(parseYesNo('الغي'), 'no');
+    assert.equal(parseYesNo('افتح لي جلسة الطلاب'), null);
+    assert.equal(parseYesNo('نعم افتح الطلاب والحضور'), null);
+    assert.equal(parseYesNo(''), null);
+});
+
+test('tts text prep and chunking', () => {
+    assert.equal(prepareSpeechText('**مرحباً** 😀 «أحمد» https://x.y/z'), 'مرحباً أحمد');
+    const long = Array.from({ length: 30 }, (_, i) => `جملة رقم ${i}،`).join(' ');
+    const chunks = splitChunks(long, 60);
+    assert.ok(chunks.length > 1);
+    assert.ok(chunks.every((c) => c.length <= 60));
+    assert.deepEqual(splitChunks('   '), []);
+});

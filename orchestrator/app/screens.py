@@ -7,51 +7,13 @@
 أنواع الإجراءات: navigate, open_modal, choices, confirm_ui, reply, send_message.
 """
 import re
-import time
-from dataclasses import dataclass, field
+from contextvars import ContextVar
 
 from .agent_backend import BackendError, Principal, get_backend
 from .agent_tools import NeedClarification, resolve_halaqa, resolve_student
 from .arabic import normalize, parse_confirmation
-
-ROLE_PREFIX = {
-    "TENANT_ADMIN": "/admin",
-    "CENTER_MANAGER": "/center-manager",
-    "TEACHER": "/teacher",
-}
-
-
-@dataclass(frozen=True)
-class Screen:
-    id: str
-    label: str
-    path: str  # بلا بادئة الدور
-    roles: frozenset
-    synonyms: tuple = field(default_factory=tuple)
-
-
-_T, _C, _A = "TEACHER", "CENTER_MANAGER", "TENANT_ADMIN"
-_ALL = frozenset({_T, _C, _A})
-_MGR = frozenset({_C, _A})
-
-SCREENS: tuple[Screen, ...] = (
-    Screen("dashboard", "لوحة التحكم", "dashboard", _ALL,
-           ("لوحة التحكم", "لوحه التحكم", "الرئيسية", "الصفحة الرئيسية", "الداشبورد", "الرئيسيه")),
-    Screen("rings", "الحلقات", "rings", _ALL, ("الحلقات", "حلقاتي", "قائمة الحلقات")),
-    Screen("students", "الطلاب", "students", _ALL, ("الطلاب", "طلابي", "قائمة الطلاب")),
-    Screen("sessions", "الجلسات", "sessions", _ALL, ("الجلسات", "جلسات")),
-    Screen("profile", "الملف الشخصي", "profile", _ALL, ("الملف الشخصي", "ملفي الشخصي", "ملفي", "حسابي", "بروفايل")),
-    Screen("attendance", "الحضور", "attendance", frozenset({_T}), ("الحضور", "تحضير", "الحضور اليومي")),
-    Screen("recitation", "التسميع", "recitation", frozenset({_T}), ("التسميع", "تقييم التسميع")),
-    Screen("progress", "متابعة التقدم", "progress", frozenset({_T}), ("متابعة التقدم", "التقدم")),
-    Screen("teachers", "المعلمون", "teachers", _MGR, ("المعلمين", "المعلمون", "معلمين", "تعيين المعلمين")),
-    Screen("rewards", "النقاط والمكافآت", "rewards", _MGR, ("النقاط", "المكافآت", "المكافات", "نقاط")),
-    Screen("reports", "التقارير", "reports", _MGR, ("التقارير", "تقارير")),
-    Screen("users", "المستخدمون", "users", frozenset({_A}), ("المستخدمين", "المستخدمون", "ادارة المستخدمين")),
-    Screen("projects", "المراكز والمشاريع", "projects", frozenset({_A}), ("المشاريع", "المشروعات")),
-    Screen("centers", "المراكز", "centers", frozenset({_A}), ("المراكز",)),
-    Screen("settings", "الإعدادات", "settings", frozenset({_A}), ("الاعدادات", "الإعدادات", "اعدادات")),
-)
+from .screen_data import ROLE_PREFIX, SCREEN_BY_ID, SCREENS, Screen, route_for, screens_for  # noqa: F401
+from .state_store import store
 
 _NAV_VERBS = {"افتح", "انقلني", "انقل", "خذني", "اذهب", "روح", "وديني", "ودني", "توجه", "انتقل",
               "اريد", "ابي", "بدي", "ادخل", "رجعني", "افتحلي"}
@@ -64,21 +26,22 @@ def _strip_al(w: str) -> str:
     return w[2:] if w.startswith("ال") and len(w) > 4 else w
 
 
+def _expand_contraction(w: str) -> str:
+    """عالطلاب => الطلاب، للطلاب => الطلاب (حرف جر ملتصق بـ «ال» في اللهجات)."""
+    if w.startswith("عال") and len(w) > 5:
+        return w[1:]
+    if w.startswith("لل") and len(w) > 5:
+        return "ال" + w[2:]
+    return w
+
+
 def _tokens(text: str) -> list[str]:
-    return [_strip_al(w) for w in normalize(text).split()]
+    return [_strip_al(_expand_contraction(w)) for w in normalize(text).split()]
 
 
 def _contains_seq(tokens: list[str], phrase: list[str]) -> bool:
     n = len(phrase)
     return n > 0 and any(tokens[i:i + n] == phrase for i in range(len(tokens) - n + 1))
-
-
-def screens_for(role: str) -> list[Screen]:
-    return [s for s in SCREENS if role in s.roles]
-
-
-def route_for(role: str, screen: Screen) -> str:
-    return f"{ROLE_PREFIX[role]}/{screen.path}"
 
 
 def match_screen(tokens: list[str]) -> Screen | None:
@@ -92,24 +55,25 @@ def match_screen(tokens: list[str]) -> Screen | None:
     return best
 
 
-# ─── حالة معلّقة بسيطة لإكمال معامل ناقص (تُنقل إلى Redis في P2) ───────────────
+# ─── حالة الحوار المعلّقة لإكمال معامل ناقص (في مخزن الحالة: Redis أو ذاكرة) ──────
 _SLOT_TTL = 300
-_slots: dict[str, dict] = {}
 
 
 def reset_slots() -> None:
-    _slots.clear()
+    """للاختبارات: يمسح كل حالة المخزن."""
+    store.clear()
 
 
 def _slot_get(key: str) -> dict | None:
-    now = time.time()
-    for k in [k for k, v in _slots.items() if v["exp"] < now]:
-        _slots.pop(k, None)
-    return _slots.get(key)
+    return store.get(f"slot:{key}")
 
 
 def _slot_set(key: str, intent: str, awaiting: str) -> None:
-    _slots[key] = {"intent": intent, "awaiting": awaiting, "exp": time.time() + _SLOT_TTL}
+    store.set(f"slot:{key}", {"intent": intent, "awaiting": awaiting}, _SLOT_TTL)
+
+
+def _slot_del(key: str) -> None:
+    store.delete(f"slot:{key}")
 
 
 # ─── أدوات بناء الإجراءات ────────────────────────────────────────────────────
@@ -126,6 +90,15 @@ def _choices(question: str, options: list[dict]) -> dict:
 
 
 _GENERIC_HALAQA_WORDS = {"طلاب", "الطلاب", "حلقه", "حلقات", "جلسه", "جلسات"}
+
+# سياق الطلب الحالي لأداة open_screen التي ينفذها النموذج (الدور الحقيقي ومفتاح الجلسة)
+_ctx_role: ContextVar[str] = ContextVar("agent_role", default="")
+_ctx_session: ContextVar[str] = ContextVar("agent_session_key", default="")
+
+
+def set_context(role: str, session_key: str) -> None:
+    _ctx_role.set((role or "").upper())
+    _ctx_session.set(session_key or "")
 
 
 def _halaqa_choices(p: Principal, intent: str, session_key: str, question: str) -> dict:
@@ -166,6 +139,73 @@ def _resolve_or_ask(fn, p, query, *, intent, awaiting, session_key):
         return None, _out("المنصة غير متاحة حالياً، حاول بعد قليل." if e.status >= 500 else f"رفضت المنصة الطلب: {e.message}")
 
 
+PASSWORD_GUIDE = (
+    "لتغيير كلمة المرور: افتح «الملف الشخصي» من الشريط الجانبي، ثم اضغط «تغيير كلمة المرور»، "
+    "أدخل كلمة المرور الحالية ثم الجديدة وأكّدها واحفظ."
+)
+
+
+def perform_open(
+    p: Principal,
+    role: str,
+    screen_id: str,
+    *,
+    halaqa_query: str = "",
+    student_query: str = "",
+    session_key: str = "",
+) -> dict:
+    """المنفّذ الواحد لكل أوامر الواجهة (يستخدمه الموجّه الحتمي وأداة open_screen للنموذج)."""
+    if role not in ROLE_PREFIX:
+        return _out("هذا الدور غير مصرّح له بالتنقل عبر المساعد.")
+
+    if screen_id == "logout":
+        return _out("هل تريد تسجيل الخروج؟",
+                    [{"type": "confirm_ui", "text": "هل تريد تسجيل الخروج من حسابك؟", "on_confirm": [{"type": "logout"}]}])
+
+    if screen_id == "change_password":
+        return _choices(
+            "هل تريد أن أرشدك بالخطوات أم أفتح لك نافذة تغيير كلمة المرور؟",
+            [
+                {"label": "أرشدني بالخطوات", "action": {"type": "reply", "text": PASSWORD_GUIDE}},
+                {"label": "افتح النافذة", "action": {"type": "open_modal", "modal": "change_password"}},
+            ],
+        )
+
+    if screen_id in ("halaqa_sessions", "start_session"):
+        name = (halaqa_query or "").strip()
+        if name and normalize(name) not in _GENERIC_HALAQA_WORDS:
+            h, err = _resolve_or_ask(resolve_halaqa, p, name, intent=screen_id, awaiting="halaqa", session_key=session_key)
+            return err if err else _halaqa_action(role, screen_id, h)
+        q = "في أي حلقة تريد بدء جلسة التسميع الجديدة؟" if screen_id == "start_session" else "جلسات أي حلقة تريد فتحها؟"
+        return _halaqa_choices(p, screen_id, session_key, q)
+
+    if screen_id == "student_profile":
+        name = (student_query or "").strip()
+        if not name:
+            _slot_set(session_key, "student_profile", "student")
+            return _out("ما اسم الطالب؟")
+        s, err = _resolve_or_ask(resolve_student, p, name, intent="student_profile", awaiting="student", session_key=session_key)
+        return err if err else _student_action(role, s)
+
+    screen = SCREEN_BY_ID.get(screen_id)
+    if not screen:
+        return _out("لم أفهم أي تبويب تقصد، هل توضح اسم التبويب؟")
+    if role not in screen.roles:
+        return _out(f"تبويب «{screen.label}» غير متاح في حسابك. يمكنني نقلك إلى لوحة التحكم أو إلى أحد التبويبات المتاحة.")
+    return _out(f"فتحت لك تبويب «{screen.label}».", [_nav(route_for(role, screen))])
+
+
+def open_screen_tool(p: Principal, args: dict) -> dict:
+    """معالج أداة open_screen (يستدعيها النموذج). الدور الحقيقي ومفتاح الجلسة من سياق الطلب."""
+    role = _ctx_role.get() or {"teacher": "TEACHER", "manager": "CENTER_MANAGER"}.get(p.role, "")
+    session_key = _ctx_session.get() or f"{p.tenant_id}:{p.user_id}:tool"
+    return perform_open(
+        p, role, args.get("screen", ""),
+        halaqa_query=args.get("halaqa_query") or "", student_query=args.get("student_query") or "",
+        session_key=session_key,
+    )
+
+
 # ─── كشف النوايا ─────────────────────────────────────────────────────────────
 _RE_LOGOUT = re.compile(r"(تسجيل الخروج|سجل خروجي|سجلني خروج|سجل خروج|اخرجني|خروج من الحساب|خروج|logout|sign out)")
 _RE_PASSWORD = re.compile(r"(كلمه المرور|كلمه السر|الرقم السري|الباسورد|باسورد|password)")
@@ -173,11 +213,6 @@ _RE_PASSWORD_CHANGE = re.compile(r"(تغيير|غير|اغير|تعديل|عدل
 _RE_NEW_SESSION = re.compile(r"(جلسه (تسميع )?جديده|ابدا جلسه|ابدء جلسه|بدء جلسه|ابدا تسميع)")
 _RE_PREV_SESSIONS = re.compile(r"(الجلسات السابقه|جلسات سابقه|جلسات الحلقه|سجل الجلسات|جلسات حلقه)")
 _RE_STUDENT_INFO = re.compile(r"(معلومات|بيانات|ملف|نشاط|تفاصيل) (ال)?طالب")
-
-PASSWORD_GUIDE = (
-    "لتغيير كلمة المرور: افتح «الملف الشخصي» من الشريط الجانبي، ثم اضغط «تغيير كلمة المرور»، "
-    "أدخل كلمة المرور الحالية ثم الجديدة وأكّدها واحفظ."
-)
 
 
 def _extract_after(text: str, markers: tuple[str, ...]) -> str:
@@ -203,6 +238,7 @@ def route_message(p: Principal, role: str, message: str, session_key: str) -> di
         return None
     raw_words = set(norm.split())
     is_question = bool(raw_words & _QUESTION_WORDS) and not (raw_words & _NAV_VERBS)
+    kw = {"session_key": session_key}
 
     # 1) إكمال معامل ناقص من سؤال سابق (إن لم تكن الرسالة أمراً جديداً صريحاً)
     slot = _slot_get(session_key)
@@ -213,55 +249,32 @@ def route_message(p: Principal, role: str, message: str, session_key: str) -> di
     )
     if slot and not explicit:
         if parse_confirmation(message) == "no" and len(tokens) <= 2:
-            _slots.pop(session_key, None)
+            _slot_del(session_key)
             return _out("حسناً، تم الإلغاء.")
+        intent = {"previous_sessions": "halaqa_sessions", "open_student": "student_profile"}.get(slot["intent"], slot["intent"])
+        _slot_del(session_key)  # يُعاد إنشاؤها عند الغموض داخل perform_open
         if slot["awaiting"] == "halaqa":
-            h, err = _resolve_or_ask(resolve_halaqa, p, message, intent=slot["intent"], awaiting="halaqa", session_key=session_key)
-            if err:
-                return err
-            _slots.pop(session_key, None)
-            return _halaqa_action(role, slot["intent"], h)
+            return perform_open(p, role, intent, halaqa_query=message, **kw)
         if slot["awaiting"] == "student":
-            s, err = _resolve_or_ask(resolve_student, p, message, intent=slot["intent"], awaiting="student", session_key=session_key)
-            if err:
-                return err
-            _slots.pop(session_key, None)
-            return _student_action(role, s)
+            return perform_open(p, role, intent, student_query=message, **kw)
 
     # 2) تسجيل الخروج: دائماً بتأكيد
     if _RE_LOGOUT.search(norm) and len(tokens) <= 6:
-        return _out("هل تريد تسجيل الخروج؟",
-                    [{"type": "confirm_ui", "text": "هل تريد تسجيل الخروج من حسابك؟", "on_confirm": [{"type": "logout"}]}])
+        return perform_open(p, role, "logout", **kw)
 
-    # 3) كلمة المرور: توجيه نصي أو فتح النافذة
+    # 3) كلمة المرور: توجيه نصي أو فتح النافذة (طلب تغيير/مساعدة فقط)
     if _RE_PASSWORD.search(norm) and _RE_PASSWORD_CHANGE.search(norm):
-        return _choices(
-            "هل تريد أن أرشدك بالخطوات أم أفتح لك نافذة تغيير كلمة المرور؟",
-            [
-                {"label": "أرشدني بالخطوات", "action": {"type": "reply", "text": PASSWORD_GUIDE}},
-                {"label": "افتح النافذة", "action": {"type": "open_modal", "modal": "change_password"}},
-            ],
-        )
+        return perform_open(p, role, "change_password", **kw)
 
     # 4) جلسة جديدة / الجلسات السابقة (تحتاج حلقة)
-    for rx, intent in ((_RE_NEW_SESSION, "start_session"), (_RE_PREV_SESSIONS, "previous_sessions")):
+    for rx, intent in ((_RE_NEW_SESSION, "start_session"), (_RE_PREV_SESSIONS, "halaqa_sessions")):
         if rx.search(norm):
-            name = _extract_after(message, ("حلقه", "حلقة"))
-            if name and normalize(name) not in _GENERIC_HALAQA_WORDS:
-                h, err = _resolve_or_ask(resolve_halaqa, p, name, intent=intent, awaiting="halaqa", session_key=session_key)
-                return err if err else _halaqa_action(role, intent, h)
-            q = "في أي حلقة تريد بدء جلسة التسميع الجديدة؟" if intent == "start_session" else "جلسات أي حلقة تريد فتحها؟"
-            return _halaqa_choices(p, intent, session_key, q)
+            return perform_open(p, role, intent, halaqa_query=_extract_after(message, ("حلقه", "حلقة")), **kw)
 
     # 5) معلومات طالب
     if _RE_STUDENT_INFO.search(norm):
-        name = _extract_after(message, ("الطالب", "طالب"))
-        name = " ".join(w for w in name.split() if w not in _FILLER)
-        if not name:
-            _slot_set(session_key, "open_student", "student")
-            return _out("ما اسم الطالب؟")
-        s, err = _resolve_or_ask(resolve_student, p, name, intent="open_student", awaiting="student", session_key=session_key)
-        return err if err else _student_action(role, s)
+        name = " ".join(w for w in _extract_after(message, ("الطالب", "طالب")).split() if w not in _FILLER)
+        return perform_open(p, role, "student_profile", student_query=name, **kw)
 
     # 6) تنقل إلى تبويب: يلزم فعل تنقل أو كلمة (تبويب/صفحة)، أو أمر قصير باسم الشاشة فقط
     if is_question:
@@ -279,6 +292,4 @@ def route_message(p: Principal, role: str, message: str, session_key: str) -> di
     bare = extra == 0 and len(tokens) <= 4
     if not (has_verb or has_marker or bare):
         return None
-    if role not in screen.roles:
-        return _out(f"تبويب «{screen.label}» غير متاح في حسابك. يمكنني نقلك إلى لوحة التحكم أو إلى أحد التبويبات المتاحة.")
-    return _out(f"فتحت لك تبويب «{screen.label}».", [_nav(route_for(role, screen))])
+    return perform_open(p, role, screen.id, **kw)
